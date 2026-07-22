@@ -26,7 +26,7 @@ python3 -m http.server 8765 --bind 127.0.0.1
 
 To move arena objects, edit colliders, change QR artwork, add simple scene objects, and save the reviewed scene back to GitHub, follow [EDITOR.md](EDITOR.md).
 
-**Online scene editor:** [zebra-scene-editor.timofeymarkin98.workers.dev](https://zebra-scene-editor.timofeymarkin98.workers.dev). Tim shares the private access code separately. The hosted page opens only the exact Zebra scene editor, supports real-time co-editing and queues validated scene-only updates to [pull request 1](https://github.com/Mucchun/zebra-circus-game/pull/1); no private engine checkout is required.
+**Online scene editor:** [zebra-scene-editor.timofeymarkin98.workers.dev](https://zebra-scene-editor.timofeymarkin98.workers.dev). Tim shares the private access code separately. The hosted page opens only the exact Zebra scene editor, supports real-time co-editing, Command-Z / Command-Shift-Z, Option/Alt + primary-drag orbit, and a revocable **Connect AI** workflow. AI may inspect/edit/undo/checkpoint the live room but cannot queue GitHub; validated scene-only GitHub updates stay human-confirmed and are reviewed in [pull request 1](https://github.com/Mucchun/zebra-circus-game/pull/1). No private engine checkout is required.
 
 Zebra pins the compatible private editor release in `game-port-studio.project.json`. For local engine work, collaborators with repository access can keep `game-port-studio` beside this repository and run:
 

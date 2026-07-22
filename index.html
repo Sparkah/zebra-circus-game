@@ -1709,7 +1709,7 @@ function startStudioAuthoring() {
   editorCamera.position.set(11, 7.5, 13);
   const badge = document.createElement('div');
   badge.className = 'studio-authoring-badge';
-  badge.innerHTML = '<strong>EDITING ORIGINAL ZEBRA RENDERER</strong>Click to select · right-drag orbit · W/E/R tools · C camera<br><button type="button">Game camera</button>';
+  badge.innerHTML = '<strong>EDITING ORIGINAL ZEBRA RENDERER</strong>Click to select · Option/Alt-drag orbit · W/E/R tools · C camera<br><button type="button">Game camera</button>';
   document.body.appendChild(badge);
 
   studioAuthoring = {
@@ -1763,8 +1763,16 @@ function installStudioAuthoringInput() {
   canvas.addEventListener('contextmenu', (event) => event.preventDefault());
   canvas.addEventListener('pointerdown', (event) => {
     if (!studioAuthoring || studioAuthoring.mode !== 'authoring') return;
-    if (event.button === 2 || event.button === 1) {
-      studioAuthoring.orbitDrag = { x: event.clientX, y: event.clientY, yaw: studioAuthoring.orbitYaw, pitch: studioAuthoring.orbitPitch };
+    if (event.button === 2 || event.button === 1 || (event.button === 0 && event.altKey)) {
+      event.preventDefault();
+      if (studioAuthoring.cameraView !== 'orbit') {
+        studioAuthoring.cameraView = 'orbit';
+        const button = studioAuthoring.badge.querySelector('button');
+        if (button) button.textContent = 'Game camera';
+        refreshStudioAuthoringHelpers();
+        requestStudioEditorRender();
+      }
+      studioAuthoring.orbitDrag = { pointerId: event.pointerId, x: event.clientX, y: event.clientY, yaw: studioAuthoring.orbitYaw, pitch: studioAuthoring.orbitPitch };
       canvas.setPointerCapture(event.pointerId);
       return;
     }
@@ -1804,7 +1812,7 @@ function installStudioAuthoringInput() {
 
   canvas.addEventListener('pointermove', (event) => {
     if (!studioAuthoring || studioAuthoring.mode !== 'authoring') return;
-    if (studioAuthoring.orbitDrag) {
+    if (studioAuthoring.orbitDrag?.pointerId === event.pointerId) {
       studioAuthoring.orbitYaw = studioAuthoring.orbitDrag.yaw - (event.clientX - studioAuthoring.orbitDrag.x) * 0.006;
       studioAuthoring.orbitPitch = Math.max(-1.35, Math.min(1.35, studioAuthoring.orbitDrag.pitch + (event.clientY - studioAuthoring.orbitDrag.y) * 0.006));
       updateStudioOrbitCamera();
@@ -1835,6 +1843,7 @@ function installStudioAuthoringInput() {
 
   const finishPointer = (event) => {
     if (!studioAuthoring) return;
+    if (studioAuthoring.orbitDrag && studioAuthoring.orbitDrag.pointerId !== event.pointerId) return;
     studioAuthoring.orbitDrag = null;
     const drag = studioAuthoring.drag;
     studioAuthoring.drag = null;
@@ -1859,6 +1868,14 @@ function installStudioAuthoringInput() {
   }, { passive: false });
   document.addEventListener('keydown', (event) => {
     if (!studioAuthoring || studioAuthoring.mode !== 'authoring') return;
+    const target = event.target;
+    if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement || target instanceof HTMLSelectElement || target?.isContentEditable) return;
+    if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'z') {
+      event.preventDefault();
+      event.stopPropagation();
+      postRuntimeBridge({ type: 'game-port-studio:editor-command', command: event.shiftKey ? 'redo' : 'undo' });
+      return;
+    }
     if (event.code === 'KeyW') setStudioAuthoringTransformMode('translate');
     if (event.code === 'KeyE') setStudioAuthoringTransformMode('rotate');
     if (event.code === 'KeyR') setStudioAuthoringTransformMode('scale');
@@ -2129,6 +2146,12 @@ if (STUDIO_AUTHORING_MODE) {
       contextToken: runtimeContextToken,
       objectCount: editableObjects.size,
       selectedObjectId: studioAuthoring?.selectedId || null,
+      orbit: studioAuthoring ? {
+        yaw: studioAuthoring.orbitYaw,
+        pitch: studioAuthoring.orbitPitch,
+        distance: studioAuthoring.orbitDistance,
+        cameraPosition: studioAuthoring.editorCamera.position.toArray(),
+      } : null,
       renderState: runtimeRenderState(),
       visualManifest: runtimeVisualManifest(),
       dynamicObjectIds: [...dynamicEditableObjectIds].sort(),

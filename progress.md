@@ -1,5 +1,14 @@
 Original prompt: Fix the scan close movement bug, add a physical level builder with colliders, and open the game through the experimental Three.js/Unity Game Port Studio for editing.
 
+Latest prompt: Let Mucchun connect her AI to the hosted editor, make Command-Z undo the previous action, and add Unity-style Option + mouse-drag scene orbit.
+
+## 2026-07-22 — v0.17 AI-ready authoring controls
+
+- The original Zebra authoring runtime now treats Option/Alt + primary drag as camera orbit before gizmo picking or selection. It switches Game camera to Orbit camera, captures only the initiating pointer, and changes no authored scene or history data.
+- Command-Z and Command-Shift-Z now leave native text fields alone but relay Undo/Redo to Game Port Studio through the existing validated source/origin/protocol/nonce/revision bridge when the iframe owns focus.
+- The authoring validation snapshot exposes orbit state so the exact-runtime Playwright gate proves camera movement without a transform, selection, revision or history change.
+- The private hosted editor can issue a room-scoped MCP connection for Mucchun's AI. The AI may inspect/edit/undo/checkpoint the live scene but cannot queue or push GitHub; that stays a human-confirmed editor action.
+
 ## 2026-07-22 — v0.16 hosted real-time scene collaboration
 
 - Added a private hosted entry at `zebra-scene-editor.timofeymarkin98.workers.dev`. It opens only the focused exact-runtime scene editor; no conversion, platform, publishing or project-generation UI is exposed.
