@@ -1776,18 +1776,16 @@ var baseline = parseJson(await readFile(baselinePath, "utf8"), "baseline Zebra s
 var claim = parseJson(await readFile(claimPath, "utf8"), "Cloudflare sync claim");
 assertClaimEnvelope(claim);
 validateScene(baseline);
-if (JSON.stringify(claim.scene.assets) !== JSON.stringify(baseline.assets)) {
-  throw new Error("The hosted claim attempted to replace Zebra's immutable asset pack.");
+var compactSha = createHash("sha256").update(JSON.stringify(claim.compact)).digest("hex");
+if (compactSha !== claim.compactSha256) {
+  throw new Error(`The compact scene hash ${compactSha} does not match the hosted receipt.`);
 }
-var validated = validateHostedZebraScene(compactSceneDocument(claim.scene), baseline);
+var validated = validateHostedZebraScene(claim.compact, baseline);
 var output = `${JSON.stringify(validated, null, 2)}
 `;
 var outputSha = createHash("sha256").update(output).digest("hex");
-if (outputSha !== claim.sceneSha256) {
-  throw new Error(`The validated scene hash ${outputSha} does not match the hosted receipt.`);
-}
 await writeFile(outputPath, output, { encoding: "utf8", flag: "wx" });
-process.stdout.write(JSON.stringify({ requestId: claim.requestId, revision: claim.revision, sceneSha256: outputSha }));
+process.stdout.write(JSON.stringify({ requestId: claim.requestId, revision: claim.revision, compactSha256: compactSha, sceneSha256: outputSha }));
 function parseJson(source, label) {
   try {
     return JSON.parse(source);
@@ -1796,11 +1794,12 @@ function parseJson(source, label) {
   }
 }
 function assertClaimEnvelope(claim2) {
-  if (!claim2 || claim2.pending !== true || typeof claim2.scene !== "object") throw new Error("The hosted response is not a pending Zebra scene claim.");
-  if (!/^[0-9a-f-]{36}$/i.test(claim2.requestId) || !/^[0-9a-f-]{36}$/i.test(claim2.leaseId)) throw new Error("The hosted claim has an invalid request identity.");
+  if (!claim2 || claim2.pending !== true || typeof claim2.compact !== "object") throw new Error("The hosted response is not a pending Zebra scene claim.");
+  const uuid = /^[a-f0-9]{8}-[a-f0-9]{4}-[1-8][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/i;
+  if (!uuid.test(claim2.requestId) || !uuid.test(claim2.leaseId)) throw new Error("The hosted claim has an invalid request identity.");
   if (!Number.isSafeInteger(claim2.revision) || claim2.revision < 1) throw new Error("The hosted claim has an invalid revision.");
   if (!/^[0-9a-f]{40}$/i.test(claim2.expectedGitHead)) throw new Error("The hosted claim has an invalid expected Git head.");
-  if (!/^[0-9a-f]{64}$/i.test(claim2.sceneSha256)) throw new Error("The hosted claim has an invalid scene digest.");
+  if (!/^[0-9a-f]{64}$/i.test(claim2.compactSha256)) throw new Error("The hosted claim has an invalid compact scene digest.");
   if (claim2.repository !== "Sparkah/zebra-circus-game" || claim2.branch !== "agent/game-port-studio-integration" || claim2.path !== "zebra-circus.scene.json") {
     throw new Error("The hosted claim targets a repository location outside the Zebra review branch.");
   }

@@ -21,7 +21,7 @@ jobs:
       - name: Check out trusted sync code
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
-          ref: main
+          ref: ${{ github.sha }}
           path: automation
           fetch-depth: 1
           persist-credentials: false
@@ -37,12 +37,12 @@ jobs:
           set -euo pipefail
           umask 077
           mkdir -p "$(dirname "$CLAIM_FILE")"
-          code="$(curl --silent --show-error --retry 2 --retry-all-errors --max-filesize 25165824 \
+          code="$(curl --silent --show-error --retry 2 --retry-all-errors --connect-timeout 10 --max-time 90 --max-filesize 1048576 \
             --output "$CLAIM_FILE" --write-out '%{http_code}' \
             --request POST "$SYNC_URL/api/github-sync/claim" \
             --header "Authorization: Bearer $SYNC_SECRET" \
             --header 'Content-Type: application/json' \
-            --data "{\"runnerId\":\"${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}\"}")"
+            --data "{\"runnerId\":\"${GITHUB_RUN_ID}\"}")"
           if [ "$code" = "204" ]; then
             echo "pending=false" >> "$GITHUB_OUTPUT"
             exit 0
@@ -54,10 +54,11 @@ jobs:
           CLAIM_FILE="$CLAIM_FILE" node --input-type=module -e '
             import fs from "node:fs";
             const claim = JSON.parse(fs.readFileSync(process.env.CLAIM_FILE, "utf8"));
-            const uuid = /^[0-9a-f-]{36}$/i, sha = /^[0-9a-f]{40}$/i;
+            const uuid = /^[a-f0-9]{8}-[a-f0-9]{4}-[1-8][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/i, sha = /^[0-9a-f]{40}$/i, digest = /^[0-9a-f]{64}$/i;
             if (claim.pending !== true || !uuid.test(claim.requestId) || !uuid.test(claim.leaseId) || !sha.test(claim.expectedGitHead)) throw new Error("Invalid Zebra claim identity.");
+            if (!digest.test(claim.compactSha256)) throw new Error("Invalid compact Zebra digest.");
             if (claim.repository !== "Sparkah/zebra-circus-game" || claim.branch !== "agent/game-port-studio-integration" || claim.path !== "zebra-circus.scene.json") throw new Error("The Zebra claim escaped its fixed repository target.");
-            fs.appendFileSync(process.env.GITHUB_OUTPUT, `pending=true\nrequest_id=${claim.requestId}\nlease_id=${claim.leaseId}\nexpected_head=${claim.expectedGitHead}\n`);
+            fs.appendFileSync(process.env.GITHUB_OUTPUT, `pending=true\nrequest_id=${claim.requestId}\nlease_id=${claim.leaseId}\nexpected_head=${claim.expectedGitHead}\ncompact_sha=${claim.compactSha256}\n`);
           '
 
       - name: Check out the review branch without executing it
@@ -144,6 +145,7 @@ jobs:
         id: complete
         env:
           COMMIT_SHA: ${{ steps.publish.outputs.commit_sha || steps.prepare.outputs.commit_sha }}
+          COMPACT_SHA: ${{ steps.claim.outputs.compact_sha }}
           COMPLETE_FILE: ${{ runner.temp }}/zebra-sync/complete.json
           LEASE_ID: ${{ steps.claim.outputs.lease_id }}
           REQUEST_ID: ${{ steps.claim.outputs.request_id }}
@@ -153,10 +155,14 @@ jobs:
         run: |
           set -euo pipefail
           node --input-type=module -e '
+            import crypto from "node:crypto";
             import fs from "node:fs";
-            fs.writeFileSync(process.env.COMPLETE_FILE, JSON.stringify({ status: "complete", requestId: process.env.REQUEST_ID, leaseId: process.env.LEASE_ID, commitSha: process.env.COMMIT_SHA }));
+            const bytes = fs.readFileSync("target/zebra-circus.scene.json");
+            const header = Buffer.from(`blob ${bytes.length}\0`);
+            const gitBlobSha = crypto.createHash("sha1").update(header).update(bytes).digest("hex");
+            fs.writeFileSync(process.env.COMPLETE_FILE, JSON.stringify({ status: "complete", requestId: process.env.REQUEST_ID, leaseId: process.env.LEASE_ID, commitSha: process.env.COMMIT_SHA, compactSha256: process.env.COMPACT_SHA, gitBlobSha }));
           '
-          curl --silent --show-error --fail-with-body --retry 2 --retry-all-errors \
+          curl --silent --show-error --fail-with-body --retry 2 --retry-all-errors --connect-timeout 10 --max-time 90 \
             --request POST "$SYNC_URL/api/github-sync/complete" \
             --header "Authorization: Bearer $SYNC_SECRET" \
             --header 'Content-Type: application/json' \
@@ -177,7 +183,7 @@ jobs:
             import fs from "node:fs";
             fs.writeFileSync(process.env.FAILURE_FILE, JSON.stringify({ status: "failed", requestId: process.env.REQUEST_ID, leaseId: process.env.LEASE_ID, message: `GitHub sync validation failed in run ${process.env.GITHUB_RUN_ID}.` }));
           '
-          curl --silent --show-error --fail-with-body \
+          curl --silent --show-error --fail-with-body --connect-timeout 10 --max-time 90 \
             --request POST "$SYNC_URL/api/github-sync/complete" \
             --header "Authorization: Bearer $SYNC_SECRET" \
             --header 'Content-Type: application/json' \
