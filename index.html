@@ -27,6 +27,18 @@
 * { margin: 0; padding: 0; box-sizing: border-box; }
 body { background: #000; overflow: hidden; font-family: 'Source Sans 3', 'Barlow', Arial, sans-serif; }
 #game-canvas { display: block; width: 100vw; height: 100vh; }
+.studio-authoring-badge {
+  position: fixed; left: 12px; bottom: 12px; z-index: 1200;
+  padding: 7px 10px; border: 1px solid rgba(185,255,119,.72);
+  background: rgba(5,12,8,.82); color: #dfffc8;
+  font: 600 11px/1.35 Arial, sans-serif; letter-spacing: .04em;
+  pointer-events: none;
+}
+.studio-authoring-badge strong { display: block; color: #b9ff77; }
+.studio-authoring-badge button {
+  margin-top: 5px; padding: 3px 7px; border: 1px solid rgba(185,255,119,.55);
+  background: #142018; color: #dfffc8; font: inherit; cursor: pointer; pointer-events: auto;
+}
 
 /* ── HUD ── */
 #hud { position: fixed; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; z-index: 10; display: none; }
@@ -446,15 +458,10 @@ body { background: #000; overflow: hidden; font-family: 'Source Sans 3', 'Barlow
       <button class="btn" id="restart-btn" style="font-family:'Barlow Condensed',sans-serif;font-size:15px;letter-spacing:4px;padding:12px 36px;">PLAY AGAIN</button>
     </div>
   </div>
-  <div style="flex:1;border-top:2px solid #00a651;overflow:hidden;position:relative;">
-    <iframe id="zebra-products-frame" src="https://www.zebra.com/us/en/products.html"
-      style="width:100%;height:100%;border:none;background:#fff;"
-      sandbox="allow-scripts allow-same-origin allow-forms allow-popups"
-      title="Zebra Technologies Products"></iframe>
-    <div id="iframe-fallback" style="display:none;position:absolute;inset:0;background:#111;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:16px;">
-      <div style="font-family:'Barlow Condensed',sans-serif;font-size:22px;color:#fff;letter-spacing:2px;">Visit Zebra Technologies</div>
-      <a href="https://www.zebra.com/us/en/products.html" target="_blank" style="color:#00a651;font-family:'Source Sans 3',sans-serif;font-size:15px;">www.zebra.com/products</a>
-    </div>
+  <div style="flex:1;border-top:2px solid #00a651;overflow:hidden;position:relative;background:#111;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:16px;">
+    <div style="font-family:'Barlow Condensed',sans-serif;font-size:28px;color:#fff;letter-spacing:3px;">EXPLORE ZEBRA TECHNOLOGIES</div>
+    <div style="font-family:'Source Sans 3',sans-serif;font-size:15px;color:#aaa;max-width:520px;text-align:center;">Zebra prevents its catalogue from being embedded by third-party pages. Open the official product catalogue securely in a new tab.</div>
+    <a href="https://www.zebra.com/us/en/products.html" target="_blank" rel="noopener noreferrer" class="btn" style="background:#00a651;border-color:#00a651;color:#fff;text-decoration:none;font-family:'Barlow Condensed',sans-serif;font-size:15px;letter-spacing:4px;padding:12px 36px;">OPEN OFFICIAL CATALOGUE ↗</a>
   </div>
 </div>
 
@@ -597,6 +604,7 @@ let collected = new Set();
 let lastShot = 0;
 let mouseDown = false;
 let isLocked = false;
+let pointerLockFallback = false;
 let infoOpen = false;
 let yaw = 0, pitch = 0;
 let weaponFlipStart = 0;
@@ -608,14 +616,533 @@ let balloons = [], weaponObjs = [], qrObjs = [], particles = [], projectiles = [
 let heldMesh = null;
 let promptTimer = null;
 let clock;
+let simulationTime = 0;
+let playerHeight = PLAYER_H;
+let runtimeSceneSource = 'embedded';
+let runtimeSceneDocument = null;
+let liveEditorSceneApplied = false;
+const editableObjects = new Map();
+const editableFallbackIds = new Map();
+const editableLightTargets = new Map();
+const dynamicEditableObjectIds = new Set();
+const dynamicEditableVisualSignatures = new Map();
+const runtimeColliders = [];
+let runtimeLayoutById = new Map();
+let runtimeWorldTransforms = new Map();
+
+const EDITOR_MESSAGE_TYPE = 'game-port-studio:scene-preview';
+const EDITOR_STATE_MESSAGE_TYPE = 'game-port-studio:editor-state';
+const RUNTIME_MODE_MESSAGE_TYPE = 'game-port-studio:runtime-mode';
+const RUNTIME_BRIDGE_PROTOCOL = 'game-port-runtime/v1';
+const STUDIO_AUTHORING_MODE = new URLSearchParams(location.search).get('studioMode') === 'authoring';
+const runtimeContextToken = globalThis.crypto?.randomUUID?.() ?? `zebra-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+let runtimeBridgeNonce = '';
+let runtimeBridgeRevision = 0;
+let runtimeBridgePeer = null;
+let studioAuthoring = null;
+let requestedStudioSelection = null;
+let requestedStudioTransformMode = 'translate';
+const SAFE_EDITOR_ID = /^[a-z0-9][a-z0-9_-]{0,63}$/i;
+const EDITOR_PRIMITIVE_TYPES = new Set(['plane', 'cube', 'sphere', 'cylinder', 'capsule']);
+const POSITION_LIMIT = 10000;
+const ROTATION_LIMIT = 360000;
+const SCALE_MIN = 0.01;
+const SCALE_MAX = 1000;
+const COLLIDER_SIZE_MIN = 0.001;
+const REQUIRED_LAYOUT_IDS = [
+  'main-camera', 'arena-floor', 'arena-dirt-ring', 'arena-performance-ring',
+  'arena-chalk-ring', 'tent',
+  ...WEAPONS.map((weapon) => `weapon-${weapon.id.toLowerCase()}`),
+  ...WEAPONS.map((weapon) => `qr-${weapon.id.toLowerCase()}`),
+  ...Array.from({ length: 4 }, (_, index) => `barrel-${index}`),
+  'center-plinth',
+  'arena-boundary-north', 'arena-boundary-south',
+  'arena-boundary-west', 'arena-boundary-east',
+];
+const CATEGORY_ROOT_IDS = [
+  'arena-root', 'devices-root', 'bleachers-root', 'decor-root',
+  'bunting-root', 'crowd-root', 'balloons-root',
+];
+const BLEACHER_SEAT_IDS = Array.from({ length: 5 }, (_, index) => `bleacher-seat-${String(index).padStart(2, '0')}`);
+const BLEACHER_RISER_IDS = Array.from({ length: 5 }, (_, index) => `bleacher-riser-${String(index).padStart(2, '0')}`);
+const BLEACHER_STRUT_IDS = Array.from({ length: 16 }, (_, index) => `bleacher-strut-${String(index).padStart(2, '0')}`);
+const TRAPEZE_IDS = ['trapeze-bar', 'trapeze-rope-left', 'trapeze-rope-right'];
+const BUNTING_IDS = Array.from({ length: 60 }, (_, index) => `bunting-${String(index).padStart(2, '0')}`);
+const PROCEDURAL_CROWD_IDS = Array.from({ length: 40 }, (_, index) => `crowd-proc-${String(index).padStart(2, '0')}`);
+const GLTF_CROWD_IDS = Array.from({ length: 28 }, (_, index) => `crowd-gltf-${String(index).padStart(2, '0')}`);
+const BALLOON_IDS = Array.from({ length: 28 }, (_, index) => `balloon-${String(index).padStart(2, '0')}`);
+const ARENA_LIGHT_IDS = [
+  'arena-ambient-light', 'arena-top-light',
+  'arena-rim-east', 'arena-rim-west', 'arena-rim-north', 'arena-rim-south',
+];
+const EDITABLE_ID_CATEGORIES = {
+  roots: CATEGORY_ROOT_IDS,
+  core: REQUIRED_LAYOUT_IDS,
+  tentDetails: ['tent-details'],
+  bleachers: [...BLEACHER_SEAT_IDS, ...BLEACHER_RISER_IDS, ...BLEACHER_STRUT_IDS],
+  trapeze: TRAPEZE_IDS,
+  bunting: BUNTING_IDS,
+  crowdProcedural: PROCEDURAL_CROWD_IDS,
+  crowdGltf: GLTF_CROWD_IDS,
+  balloons: BALLOON_IDS,
+  lights: ARENA_LIGHT_IDS,
+};
+const EXPECTED_EDITABLE_IDS = [...new Set(Object.values(EDITABLE_ID_CATEGORIES).flat())];
+const FIXED_EDITABLE_IDS = new Set(EXPECTED_EDITABLE_IDS);
+const MAX_SCENE_OBJECTS = 500;
+const MAX_SCENE_DEPTH = 64;
+
+function createSeededRandom(seed) {
+  let state = seed >>> 0;
+  return () => {
+    state = (state * 1664525 + 1013904223) >>> 0;
+    return state / 4294967296;
+  };
+}
+
+function buildPersistentSceneObjects() {
+  const originalRandom = Math.random;
+  Math.random = createSeededRandom(0x5eb2a123);
+  try {
+    buildScene();
+    spawnWeapons();
+    spawnBalloons(28);
+    placeQRCodes();
+  } finally {
+    Math.random = originalRandom;
+  }
+}
+
+function fallbackObject(id, position, scale = { x: 1, y: 1, z: 1 }, rotation = { x: 0, y: 0, z: 0 }, components = [], visible = true) {
+  return { id, name: id, parentId: null, visible, locked: false, position, rotation, scale, components };
+}
+
+function fallbackCollider(size, center = { x: 0, y: 0, z: 0 }) {
+  return { id: 'box-collider', type: 'box-collider', enabled: true, center, size, isTrigger: false };
+}
+
+function makeEmbeddedSceneFallback() {
+  const one = { x: 1, y: 1, z: 1 };
+  const zero = { x: 0, y: 0, z: 0 };
+  const weaponRadius = [5, 6.5, 8, 5];
+  const weaponObjects = WEAPONS.map((weapon, index) => {
+    const angle = index / WEAPONS.length * Math.PI * 2;
+    return fallbackObject(
+      `weapon-${weapon.id.toLowerCase()}`,
+      { x: Math.cos(angle) * weaponRadius[index], y: 0.45, z: Math.sin(angle) * weaponRadius[index] },
+      one,
+      { x: 0, y: index * 90, z: 0 },
+    );
+  });
+  const qrObjects = WEAPONS.map((weapon, index) => {
+    const angle = index / WEAPONS.length * Math.PI * 2 + Math.PI * 0.18;
+    const x = Math.cos(angle) * 9;
+    const z = Math.sin(angle) * 9;
+    return fallbackObject(
+      `qr-${weapon.id.toLowerCase()}`,
+      { x, y: 3, z },
+      one,
+      { x: 0, y: Math.atan2(-x, -z) * 180 / Math.PI, z: 0 },
+      [fallbackCollider({ x: 1.7, y: 3.8, z: 0.2 }, { x: 0, y: -1.1, z: 0 })],
+    );
+  });
+  const barrelObjects = Array.from({ length: 4 }, (_, index) => {
+    const angle = index / 4 * Math.PI * 2 + Math.PI / 4;
+    return fallbackObject(
+      `barrel-${index}`,
+      { x: Math.cos(angle) * 7.2, y: 0.425, z: Math.sin(angle) * 7.2 },
+      { x: 0.84, y: 0.85, z: 0.84 },
+      zero,
+      [fallbackCollider(one)],
+    );
+  });
+  const boundaryObjects = [
+    ['north', 0, -21.5, 43, 1], ['south', 0, 21.5, 43, 1],
+    ['west', -21.5, 0, 1, 43], ['east', 21.5, 0, 1, 43],
+  ].map(([side, x, z, sx, sz]) => fallbackObject(
+    `arena-boundary-${side}`,
+    { x, y: 1.5, z },
+    one,
+    zero,
+    [fallbackCollider({ x: sx, y: 3, z: sz })],
+  ));
+
+  return {
+    schema: 'game-port-studio/scene@0.13',
+    name: 'Zebra Circus Blaster (embedded fallback)',
+    inputActions: [{ id: 'move', name: 'Move', valueType: 'vector2', bindings: ['keyboard-wasd-arrows', 'gamepad-left-stick', 'touch-virtual-stick'] }],
+    objects: [
+      fallbackObject('main-camera', { x: 0, y: PLAYER_H, z: 2 }, one, zero, [
+        { id: 'camera', type: 'camera', enabled: true, projection: 'perspective', verticalFov: 72, nearClip: 0.05, farClip: 150 },
+        { id: 'move-from-input', type: 'move-from-input', enabled: true, inputActionId: 'move', plane: 'xz', space: 'parent', speed: 6 },
+        fallbackCollider({ x: 0.8, y: 1.7, z: 0.8 }, { x: 0, y: -0.85, z: 0 }),
+      ]),
+      fallbackObject('arena-floor', zero, { x: 52, y: 1, z: 52 }, zero, [fallbackCollider({ x: 1, y: 0.2, z: 1 }, { x: 0, y: -0.1, z: 0 })]),
+      fallbackObject('arena-dirt-ring', { x: 0, y: 0.01, z: 0 }, { x: 26, y: 0.02, z: 26 }),
+      fallbackObject('arena-performance-ring', { x: 0, y: 0.02, z: 0 }, { x: 18, y: 1, z: 18 }),
+      fallbackObject('arena-chalk-ring', { x: 0, y: 0.03, z: 0 }, { x: 18.4, y: 0.025, z: 18.4 }),
+      fallbackObject('tent', zero),
+      ...weaponObjects,
+      ...qrObjects,
+      ...barrelObjects,
+      fallbackObject('center-plinth', { x: 0, y: 0.55, z: -2.5 }, { x: 1.3, y: 1.1, z: 1.3 }, zero, [fallbackCollider(one)]),
+      ...boundaryObjects,
+    ],
+  };
+}
+
+function sanitizeVector(value, label, { minimum = -POSITION_LIMIT, maximum = POSITION_LIMIT } = {}) {
+  if (!value || typeof value !== 'object') throw new Error(`${label} must be an object`);
+  const output = {};
+  for (const axis of ['x', 'y', 'z']) {
+    const number = value[axis];
+    if (!Number.isFinite(number) || number < minimum || number > maximum) {
+      throw new Error(`${label}.${axis} is outside the supported range`);
+    }
+    output[axis] = number;
+  }
+  return output;
+}
+
+function sanitizeInlineMaterial(definition, label) {
+  if (!definition || typeof definition !== 'object' || definition.kind !== 'inline') throw new Error(`${label} must be an inline material`);
+  const shading = definition.shading ?? 'lit';
+  const baseColor = definition.baseColor ?? '#ffffff';
+  const baseColorTextureAssetId = definition.baseColorTextureAssetId ?? null;
+  const roughness = definition.roughness ?? 0.72;
+  const metalness = definition.metalness ?? 0.04;
+  const opacity = definition.opacity ?? 1;
+  const alphaMode = definition.alphaMode ?? 'opaque';
+  const alphaCutoff = definition.alphaCutoff ?? 0.5;
+  const doubleSided = definition.doubleSided ?? true;
+  if (!['lit', 'unlit'].includes(shading)) throw new Error(`${label} shading is invalid`);
+  if (typeof baseColor !== 'string' || !/^#[0-9a-f]{6}$/i.test(baseColor)) throw new Error(`${label} base color is invalid`);
+  if (baseColorTextureAssetId !== null && (typeof baseColorTextureAssetId !== 'string' || !SAFE_EDITOR_ID.test(baseColorTextureAssetId))) throw new Error(`${label} texture asset id is invalid`);
+  for (const [field, value] of [['roughness', roughness], ['metalness', metalness], ['opacity', opacity], ['alpha cutoff', alphaCutoff]]) {
+    if (!Number.isFinite(value) || value < 0 || value > 1) throw new Error(`${label} ${field} must be between 0 and 1`);
+  }
+  if (!['opaque', 'mask', 'blend'].includes(alphaMode)) throw new Error(`${label} alpha mode is invalid`);
+  if (typeof doubleSided !== 'boolean') throw new Error(`${label} double-sided state is invalid`);
+  return {
+    kind: 'inline', shading, baseColor: baseColor.toLowerCase(), baseColorTextureAssetId,
+    roughness, metalness, opacity, alphaMode, alphaCutoff, doubleSided,
+  };
+}
+
+function sanitizeEmbeddedMaterial(definition, label) {
+  if (!definition || typeof definition !== 'object' || definition.kind !== 'embedded' || !Array.isArray(definition.overrides) || definition.overrides.length > 64) {
+    throw new Error(`${label} embedded material is invalid`);
+  }
+  const slots = new Set();
+  const overrides = definition.overrides.map((override, index) => {
+    if (!override || typeof override !== 'object' || typeof override.slot !== 'string' || !override.slot.trim() || override.slot.length > 128) {
+      throw new Error(`${label} override ${index} has an invalid slot`);
+    }
+    const key = override.slot.toLowerCase();
+    if (slots.has(key)) throw new Error(`${label} has duplicate override slot ${override.slot}`);
+    slots.add(key);
+    return { slot: override.slot, material: sanitizeInlineMaterial(override.material, `${label} override ${override.slot}`) };
+  });
+  return { kind: 'embedded', overrides };
+}
+
+function validateSceneDocument(candidate, { allowSlimPreview = false } = {}) {
+  if (!candidate || typeof candidate !== 'object' || Array.isArray(candidate)) throw new Error('Scene must be an object');
+  if (!['game-port-studio/scene@0.13', 'game-port-studio/scene@0.14'].includes(candidate.schema)) throw new Error('Unsupported scene schema');
+  if (typeof candidate.name !== 'string' || !candidate.name.trim() || candidate.name.length > 80) throw new Error('Scene name is invalid');
+  const previewFallbackActions = runtimeSceneDocument?.inputActions
+    ?? [{ id: 'move', name: 'Move', valueType: 'vector2', bindings: ['keyboard-wasd-arrows', 'gamepad-left-stick', 'touch-virtual-stick'] }];
+  const candidateInputActions = Array.isArray(candidate.inputActions)
+    ? candidate.inputActions
+    : allowSlimPreview
+      ? previewFallbackActions
+      : null;
+  if (!candidateInputActions || candidateInputActions.length > 16) throw new Error('Scene input actions are invalid');
+  const actionIds = new Set();
+  const inputActions = candidateInputActions.map((action) => {
+    if (!action || typeof action !== 'object' || typeof action.id !== 'string' || typeof action.name !== 'string') throw new Error('Scene input action is invalid');
+    const actionKey = action.id.toLowerCase();
+    if (!SAFE_EDITOR_ID.test(action.id) || actionIds.has(actionKey) || action.name.length < 1 || action.name.length > 80) throw new Error('Scene input action id or name is invalid');
+    actionIds.add(actionKey);
+    const allowedBindings = action.valueType === 'vector2'
+      ? ['keyboard-wasd-arrows', 'gamepad-left-stick', 'touch-virtual-stick']
+      : action.valueType === 'button'
+        ? ['keyboard-space-enter', 'gamepad-south-button', 'touch-action-button']
+        : null;
+    if (!allowedBindings || !Array.isArray(action.bindings) || !action.bindings.every((binding) => allowedBindings.includes(binding))) throw new Error(`Input action ${action.id} is unsupported`);
+    return { id: action.id, name: action.name, valueType: action.valueType, bindings: [...action.bindings] };
+  });
+  if (!inputActions.some((action) => action.id === 'move' && action.valueType === 'vector2')) throw new Error('Scene is missing the move input action');
+  if (!Array.isArray(candidate.objects) || candidate.objects.length > MAX_SCENE_OBJECTS) throw new Error('Scene objects are invalid');
+
+  const ids = new Set();
+  const caseFoldedIds = new Set();
+  const objects = candidate.objects.map((entry, index) => {
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) throw new Error(`Object ${index} is invalid`);
+    const idKey = typeof entry.id === 'string' ? entry.id.toLowerCase() : '';
+    if (typeof entry.id !== 'string' || !SAFE_EDITOR_ID.test(entry.id) || caseFoldedIds.has(idKey)) throw new Error(`Object ${index} has an invalid or duplicate id`);
+    ids.add(entry.id);
+    caseFoldedIds.add(idKey);
+    const components = [];
+    if (!Array.isArray(entry.components) || entry.components.length > 16) throw new Error(`Object ${entry.id} components are invalid`);
+    const componentTypes = new Set();
+    const componentIds = new Set();
+    for (const component of entry.components) {
+      const componentIdKey = typeof component?.id === 'string' ? component.id.toLowerCase() : '';
+      if (!component || typeof component !== 'object' || typeof component.id !== 'string' || !SAFE_EDITOR_ID.test(component.id) || componentIds.has(componentIdKey) || componentTypes.has(component.type)) throw new Error(`Object ${entry.id} has an invalid or duplicate component`);
+      componentIds.add(componentIdKey);
+      componentTypes.add(component.type);
+      if (component.type === 'mesh-renderer') {
+        if (typeof component.enabled !== 'boolean' || !component.source || typeof component.source !== 'object') throw new Error(`Object ${entry.id} Mesh Renderer is invalid`);
+        const source = component.source.kind === 'asset' && typeof component.source.assetId === 'string' && SAFE_EDITOR_ID.test(component.source.assetId)
+          ? { kind: 'asset', assetId: component.source.assetId }
+          : component.source.kind === 'primitive' && EDITOR_PRIMITIVE_TYPES.has(component.source.primitive)
+            ? { kind: 'primitive', primitive: component.source.primitive }
+            : null;
+        if (!source) throw new Error(`Object ${entry.id} mesh source is invalid`);
+        const material = component.material?.kind === 'embedded'
+          ? sanitizeEmbeddedMaterial(component.material, `Object ${entry.id} material`)
+          : component.material?.kind === 'inline'
+            ? sanitizeInlineMaterial(component.material, `Object ${entry.id} material`)
+            : null;
+        if (!material) throw new Error(`Object ${entry.id} material is invalid`);
+        if (source.kind === 'primitive' && material.kind !== 'inline') throw new Error(`Object ${entry.id} primitive mesh requires an inline material`);
+        components.push({ id: component.id, type: 'mesh-renderer', enabled: component.enabled, source, material });
+      } else if (component.type === 'box-collider') {
+        if (typeof component.enabled !== 'boolean' || typeof component.isTrigger !== 'boolean') throw new Error(`Object ${entry.id} collider flags are invalid`);
+        components.push({
+          id: component.id, type: 'box-collider', enabled: component.enabled,
+          center: sanitizeVector(component.center, `${entry.id}.collider.center`, { minimum: -POSITION_LIMIT, maximum: POSITION_LIMIT }),
+          size: sanitizeVector(component.size, `${entry.id}.collider.size`, { minimum: COLLIDER_SIZE_MIN, maximum: POSITION_LIMIT }),
+          isTrigger: component.isTrigger,
+        });
+      } else if (component.type === 'camera') {
+        const verticalFov = Number.isFinite(component.verticalFov) ? component.verticalFov : 72;
+        const nearClip = Number.isFinite(component.nearClip) ? component.nearClip : 0.05;
+        const farClip = Number.isFinite(component.farClip) ? component.farClip : 150;
+        if (typeof component.enabled !== 'boolean' || component.projection !== 'perspective' || verticalFov < 1 || verticalFov > 179 || nearClip < 0.001 || nearClip > 9999 || farClip < 0.01 || farClip > 100000 || farClip <= nearClip) throw new Error(`Object ${entry.id} camera settings are invalid`);
+        components.push({ id: component.id, type: 'camera', enabled: component.enabled, projection: 'perspective', verticalFov, nearClip, farClip });
+      } else if (component.type === 'move-from-input') {
+        if (typeof component.enabled !== 'boolean' || component.inputActionId !== 'move' || component.plane !== 'xz' || component.space !== 'parent' || !Number.isFinite(component.speed) || component.speed < 0 || component.speed > 1000) {
+          throw new Error(`Object ${entry.id} Move From Input is invalid`);
+        }
+        components.push({ id: component.id, type: 'move-from-input', enabled: component.enabled, inputActionId: 'move', plane: 'xz', space: 'parent', speed: component.speed });
+      } else if (component.type === 'directional-light') {
+        if (typeof component.enabled !== 'boolean'
+          || typeof component.color !== 'string'
+          || !/^#[0-9a-f]{6}$/i.test(component.color)
+          || !Number.isFinite(component.intensity)
+          || component.intensity < 0
+          || component.intensity > 100
+          || typeof component.castShadows !== 'boolean') {
+          throw new Error(`Object ${entry.id} light settings are invalid`);
+        }
+        components.push({
+          id: component.id, type: 'directional-light', enabled: component.enabled,
+          color: component.color.toLowerCase(), intensity: component.intensity, castShadows: component.castShadows,
+        });
+      }
+    }
+    return {
+      id: entry.id,
+      name: typeof entry.name === 'string' && entry.name.trim() && entry.name.length <= 80 ? entry.name : (() => { throw new Error(`Object ${entry.id} has an invalid name`); })(),
+      parentId: entry.parentId === null || entry.parentId === undefined
+        ? null
+        : typeof entry.parentId === 'string' && SAFE_EDITOR_ID.test(entry.parentId)
+          ? entry.parentId
+          : (() => { throw new Error(`Object ${entry.id} has an invalid parent id`); })(),
+      visible: entry.visible !== false,
+      locked: entry.locked === true,
+      position: sanitizeVector(entry.position, `${entry.id}.position`, { minimum: -POSITION_LIMIT, maximum: POSITION_LIMIT }),
+      rotation: sanitizeVector(entry.rotation, `${entry.id}.rotation`, { minimum: -ROTATION_LIMIT, maximum: ROTATION_LIMIT }),
+      scale: sanitizeVector(entry.scale, `${entry.id}.scale`, { minimum: SCALE_MIN, maximum: SCALE_MAX }),
+      components,
+    };
+  });
+
+  const objectsById = new Map(objects.map((entry) => [entry.id, entry]));
+  for (const object of objects) {
+    if (object.parentId !== null && !objectsById.has(object.parentId)) {
+      throw new Error(`Object ${object.id} references missing parent ${object.parentId}`);
+    }
+  }
+  const resolvedDepths = new Map();
+  function hierarchyDepth(object, ancestry = new Set()) {
+    if (resolvedDepths.has(object.id)) return resolvedDepths.get(object.id);
+    if (ancestry.has(object.id)) throw new Error(`Scene object hierarchy contains a cycle at ${object.id}`);
+    const nextAncestry = new Set(ancestry);
+    nextAncestry.add(object.id);
+    const depth = object.parentId === null
+      ? 0
+      : hierarchyDepth(objectsById.get(object.parentId), nextAncestry) + 1;
+    if (depth >= MAX_SCENE_DEPTH) throw new Error(`Scene object hierarchy exceeds the maximum depth of ${MAX_SCENE_DEPTH} at ${object.id}`);
+    resolvedDepths.set(object.id, depth);
+    return depth;
+  }
+  for (const object of objects) hierarchyDepth(object);
+
+  const expandedScene = ids.has('arena-root') || ids.has('balloons-root') || ids.has('tent-details');
+  const requiredLayoutIds = allowSlimPreview || expandedScene ? EXPECTED_EDITABLE_IDS : REQUIRED_LAYOUT_IDS;
+  for (const requiredId of requiredLayoutIds) {
+    if (!ids.has(requiredId)) throw new Error(`Scene is missing required object ${requiredId}`);
+  }
+  for (const object of objects) {
+    if (FIXED_EDITABLE_IDS.has(object.id)) continue;
+    const unsupported = object.components.find((component) => component.type !== 'mesh-renderer' && component.type !== 'box-collider');
+    if (unsupported) throw new Error(`Added object ${object.id} uses unsupported live-authoring component ${unsupported.type}`);
+    const rendererComponent = object.components.find((component) => component.type === 'mesh-renderer');
+    if (!rendererComponent) continue;
+    if (rendererComponent.source.kind === 'asset') {
+      throw new Error(`Added object ${object.id} uses asset-backed mesh ${rendererComponent.source.assetId}; embedded GLB authoring is not available in Zebra runtime`);
+    }
+    if (rendererComponent.material.kind !== 'inline') throw new Error(`Added object ${object.id} requires an inline primitive material`);
+    if (rendererComponent.material.baseColorTextureAssetId !== null) {
+      throw new Error(`Added object ${object.id} uses an image texture; embedded image authoring is not available in Zebra runtime`);
+    }
+  }
+  return { schema: candidate.schema, name: candidate.name, inputActions, objects };
+}
+
+async function loadSceneDocument() {
+  const fallback = validateSceneDocument(makeEmbeddedSceneFallback());
+  try {
+    // The legacy PWA worker is cache-first, so use a unique URL to ensure an
+    // editor export on disk is reflected on the very next game load.
+    const sceneUrl = `zebra-circus.scene.json?runtime=${Date.now()}`;
+    const response = await fetch(sceneUrl, { cache: 'no-store' });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const document = validateSceneDocument(await response.json());
+    runtimeSceneSource = 'zebra-circus.scene.json';
+    return document;
+  } catch (error) {
+    console.warn(`Using embedded Zebra scene fallback: ${error.message}`);
+    runtimeSceneSource = 'embedded';
+    return fallback;
+  }
+}
+
+function trustedEditorOrigins() {
+  const origins = new Set();
+  if (location.origin && location.origin !== 'null') origins.add(location.origin);
+  const configured = new URLSearchParams(location.search).get('editorOrigin');
+  if (configured) {
+    try {
+      const parsed = new URL(configured);
+      const loopbackHosts = new Set(['localhost', '127.0.0.1', '[::1]']);
+      if ((parsed.protocol === 'http:' || parsed.protocol === 'https:') && loopbackHosts.has(parsed.hostname)) {
+        origins.add(parsed.origin);
+      } else {
+        console.warn('Ignored non-loopback editorOrigin query parameter');
+      }
+    } catch (error) {
+      console.warn(`Ignored invalid editorOrigin query parameter: ${error.message}`);
+    }
+  }
+  return origins;
+}
+
+const allowedEditorOrigins = trustedEditorOrigins();
+function postScenePreviewRejected(event, data, error) {
+  if (!event.source || typeof event.source.postMessage !== 'function') return;
+  const message = error instanceof Error ? error.message : String(error);
+  event.source.postMessage({
+    type: 'game-port-studio:scene-preview-rejected',
+    protocol: RUNTIME_BRIDGE_PROTOCOL,
+    nonce: typeof data?.nonce === 'string' ? data.nonce : '',
+    revision: Number.isInteger(data?.revision) ? data.revision : -1,
+    contextToken: runtimeContextToken,
+    error: message.slice(0, 300),
+  }, event.origin);
+}
+
+window.addEventListener('message', (event) => {
+  if (!allowedEditorOrigins.has(event.origin)) return;
+  const trustedSource = event.source === window
+    || event.source === window.parent
+    || (window.opener !== null && event.source === window.opener);
+  if (!event.source || !trustedSource) return;
+  const data = event.data;
+  if (!data || typeof data !== 'object') return;
+  if (data.type === EDITOR_MESSAGE_TYPE) {
+    if (data.protocol !== RUNTIME_BRIDGE_PROTOCOL) {
+      postScenePreviewRejected(event, data, 'Unsupported runtime bridge protocol');
+      return;
+    }
+    if (typeof data.nonce !== 'string' || !data.nonce) {
+      postScenePreviewRejected(event, data, 'Scene preview nonce is invalid');
+      return;
+    }
+    if (!Number.isInteger(data.revision)) {
+      postScenePreviewRejected(event, data, 'Scene preview revision must be an integer');
+      return;
+    }
+    if (data.revision < runtimeBridgeRevision) {
+      postScenePreviewRejected(event, data, `Scene preview revision ${data.revision} is older than active revision ${runtimeBridgeRevision}`);
+      return;
+    }
+    if (runtimeBridgePeer && (runtimeBridgePeer.source !== event.source || runtimeBridgePeer.origin !== event.origin || runtimeBridgeNonce !== data.nonce)) {
+      postScenePreviewRejected(event, data, 'Scene preview does not match the active editor peer');
+      return;
+    }
+    try {
+      const document = validateSceneDocument(data.scene, { allowSlimPreview: true });
+      applySceneDocument(document, 'live-editor');
+      runtimeBridgePeer = { source: event.source, origin: event.origin };
+      runtimeBridgeNonce = data.nonce;
+      runtimeBridgeRevision = data.revision;
+      liveEditorSceneApplied = true;
+      postRuntimeBridge({
+        type: 'game-port-studio:scene-preview-applied',
+        objectCount: document.objects.length,
+        contextToken: runtimeContextToken,
+        visualManifestHash: runtimeVisualManifestHash(),
+      });
+      requestStudioEditorRender();
+    } catch (error) {
+      console.warn(`Rejected editor scene preview: ${error.message}`);
+      postScenePreviewRejected(event, data, error);
+    }
+    return;
+  }
+  if (!runtimeBridgePeer
+    || runtimeBridgePeer.source !== event.source
+    || runtimeBridgePeer.origin !== event.origin
+    || data.protocol !== RUNTIME_BRIDGE_PROTOCOL
+    || data.nonce !== runtimeBridgeNonce
+    || data.revision !== runtimeBridgeRevision) return;
+  if (data.type === EDITOR_STATE_MESSAGE_TYPE) {
+    requestedStudioSelection = typeof data.selectedObjectId === 'string' ? data.selectedObjectId : null;
+    requestedStudioTransformMode = ['translate', 'rotate', 'scale'].includes(data.transformMode) ? data.transformMode : 'translate';
+    setStudioAuthoringSelection(requestedStudioSelection);
+    setStudioAuthoringTransformMode(requestedStudioTransformMode);
+    return;
+  }
+  if (data.type === RUNTIME_MODE_MESSAGE_TYPE && ['authoring', 'playing', 'paused'].includes(data.mode)) {
+    setStudioRuntimeMode(data.mode);
+  }
+});
+
+function postRuntimeBridge(message) {
+  if (!runtimeBridgePeer || !runtimeBridgeNonce) return;
+  runtimeBridgePeer.source.postMessage({
+    ...message,
+    protocol: RUNTIME_BRIDGE_PROTOCOL,
+    nonce: runtimeBridgeNonce,
+    revision: runtimeBridgeRevision,
+  }, runtimeBridgePeer.origin);
+}
 
 // ═══════════════════════════════════════════════
 //  INIT
 // ═══════════════════════════════════════════════
-window.addEventListener('load', () => {
+window.addEventListener('load', async () => {
+  const initialSceneDocument = await loadSceneDocument();
+  if (!liveEditorSceneApplied) applySceneDocument(initialSceneDocument, runtimeSceneSource);
+  else runtimeSceneSource = 'live-editor';
   loadDeviceModels().then(() => {
     document.getElementById('loading-screen').style.display = 'none';
-    document.getElementById('start-screen').style.display = 'flex';
+    if (STUDIO_AUTHORING_MODE) startStudioAuthoring();
+    else document.getElementById('start-screen').style.display = 'flex';
   });
 });
 
@@ -683,24 +1210,956 @@ function loadDeviceModels() {
 document.getElementById('play-btn').addEventListener('click', startGame);
 document.getElementById('restart-btn').addEventListener('click', restartGame);
 document.getElementById('tut-go-btn').addEventListener('click', dismissTutorial);
-document.getElementById('ip-close').addEventListener('click', closeInfo);
-document.getElementById('open-zebra-btn').addEventListener('click', () => window.open('https://www.zebra.com/us/en/products.html','_blank'));
-document.getElementById('mp-explore-btn').addEventListener('click', () => window.open('https://www.zebra.com/us/en/products.html','_blank'));
+document.getElementById('ip-close').addEventListener('click', () => closeInfo({ resumeGame: true }));
+document.getElementById('open-zebra-btn').addEventListener('click', () => window.open('https://www.zebra.com/us/en/products.html','_blank','noopener,noreferrer'));
+document.getElementById('mp-explore-btn').addEventListener('click', () => window.open('https://www.zebra.com/us/en/products.html','_blank','noopener,noreferrer'));
 document.getElementById('mp-continue-btn').addEventListener('click', () => {
   document.getElementById('milestone-popup').style.display = 'none';
-  document.getElementById('game-canvas').requestPointerLock();
+  requestGamePointerLock();
 });
 
-function startGame() {
+function layoutObject(id) {
+  return runtimeLayoutById.get(id) ?? null;
+}
+
+function rebuildRuntimeLayoutCaches(document) {
+  runtimeLayoutById = new Map(document.objects.map((entry) => [entry.id, entry]));
+  runtimeWorldTransforms = new Map();
+
+  function resolveWorldTransform(id) {
+    const cached = runtimeWorldTransforms.get(id);
+    if (cached) return cached;
+    const layout = runtimeLayoutById.get(id);
+    if (!layout) return null;
+    const localPosition = new THREE.Vector3(layout.position.x, layout.position.y, layout.position.z);
+    const localRotation = new THREE.Euler(
+      THREE.MathUtils.degToRad(layout.rotation.x),
+      THREE.MathUtils.degToRad(layout.rotation.y),
+      THREE.MathUtils.degToRad(layout.rotation.z),
+      'YXZ',
+    );
+    const localQuaternion = new THREE.Quaternion().setFromEuler(localRotation);
+    const localScale = new THREE.Vector3(layout.scale.x, layout.scale.y, layout.scale.z);
+    const matrix = new THREE.Matrix4().compose(localPosition, localQuaternion, localScale);
+    let visible = layout.visible;
+    if (layout.parentId !== null) {
+      const parent = resolveWorldTransform(layout.parentId);
+      matrix.premultiply(parent.matrix);
+      visible = visible && parent.visible;
+    }
+    const position = new THREE.Vector3();
+    const quaternion = new THREE.Quaternion();
+    const scale = new THREE.Vector3();
+    matrix.decompose(position, quaternion, scale);
+    const resolved = { layout, matrix, position, quaternion, scale, visible };
+    runtimeWorldTransforms.set(id, resolved);
+    return resolved;
+  }
+
+  for (const layout of document.objects) resolveWorldTransform(layout.id);
+}
+
+function editableWorldTransform(id) {
+  return runtimeWorldTransforms.get(id)
+    ?? runtimeWorldTransforms.get(editableFallbackIds.get(id))
+    ?? null;
+}
+
+function applyObjectTransform(target, resolved) {
+  if (!target || !resolved) return;
+  target.position.copy(resolved.position);
+  target.rotation.order = 'YXZ';
+  target.quaternion.copy(resolved.quaternion);
+  target.scale.copy(resolved.scale);
+  target.visible = resolved.visible && target.userData.runtimeStateVisible !== false;
+  target.updateMatrixWorld(true);
+}
+
+function applyLocalLayoutTransform(target, layout) {
+  if (!target || !layout) return;
+  target.position.set(layout.position.x, layout.position.y, layout.position.z);
+  target.rotation.order = 'YXZ';
+  target.rotation.set(
+    THREE.MathUtils.degToRad(layout.rotation.x),
+    THREE.MathUtils.degToRad(layout.rotation.y),
+    THREE.MathUtils.degToRad(layout.rotation.z),
+    'YXZ',
+  );
+  target.scale.set(layout.scale.x, layout.scale.y, layout.scale.z);
+  target.visible = layout.visible && target.userData.runtimeStateVisible !== false;
+  target.updateMatrixWorld(true);
+}
+
+function applyEditableLight(id, target, resolved) {
+  if (!target?.isLight || !resolved) return;
+  const component = resolved.layout.components.find((entry) => entry.type === 'directional-light');
+  if (component) {
+    target.color.set(component.color);
+    target.intensity = component.intensity;
+    target.castShadow = component.castShadows;
+    target.visible = target.visible && component.enabled;
+  }
+  const lightTarget = editableLightTargets.get(id);
+  if (lightTarget) {
+    const forward = new THREE.Vector3(0, 0, 1).applyQuaternion(resolved.quaternion).normalize();
+    lightTarget.position.copy(resolved.position).addScaledVector(forward, 10);
+    lightTarget.updateMatrixWorld(true);
+  }
+}
+
+function applyInlineMaterialDefinition(material, definition) {
+  if (!material || !definition) return;
+  if (typeof definition.baseColor === 'string' && /^#[0-9a-f]{6}$/i.test(definition.baseColor) && material.color) material.color.set(definition.baseColor);
+  if (Number.isFinite(definition.opacity)) {
+    material.opacity = Math.max(0, Math.min(1, definition.opacity));
+    material.transparent = definition.alphaMode === 'blend';
+  }
+  material.alphaTest = definition.alphaMode === 'mask' ? definition.alphaCutoff : 0;
+  material.depthWrite = definition.alphaMode !== 'blend';
+  if (Number.isFinite(definition.roughness) && 'roughness' in material) material.roughness = definition.roughness;
+  if (Number.isFinite(definition.metalness) && 'metalness' in material) material.metalness = definition.metalness;
+  if (typeof definition.doubleSided === 'boolean') material.side = definition.doubleSided ? THREE.DoubleSide : THREE.FrontSide;
+  material.needsUpdate = true;
+}
+
+function applyQrAssetSelection(id, target, rendererComponent) {
+  if (!id.startsWith('qr-') || rendererComponent?.source?.kind !== 'asset') return;
+  const match = /^asset-qr-(mc9400|mc3400|ps30|tc8300)$/i.exec(rendererComponent.source.assetId);
+  if (!match) return;
+  const weapon = WEAPONS.find((entry) => entry.id.toLowerCase() === match[1].toLowerCase());
+  if (!weapon || target.userData.appliedQrAssetId === rendererComponent.source.assetId) return;
+  const qrFace = target.children.find((child) => child.material?.name === 'QrFace') || target.children[1];
+  const label = target.children.find((child) => child.material?.name === 'Label') || target.children[2];
+  if (qrFace?.material) {
+    qrFace.material.map?.dispose?.();
+    qrFace.material.map = makeQRTexture(weapon);
+    qrFace.material.needsUpdate = true;
+  }
+  if (label?.material) {
+    label.material.map?.dispose?.();
+    label.material.map = makeQRLabelTexture(weapon);
+    label.material.needsUpdate = true;
+  }
+  const runtimeQr = qrObjs.find((entry) => entry.g === target);
+  if (runtimeQr) runtimeQr.w = weapon;
+  target.userData.visualSource = `qr-board:${weapon.id}`;
+  target.userData.appliedQrAssetId = rendererComponent.source.assetId;
+}
+
+function traverseOwnedRuntimeObject(target, visit) {
+  const walk = (node) => {
+    if (node !== target && node.userData?.editorObjectId) return;
+    visit(node);
+    for (const child of node.children || []) walk(child);
+  };
+  walk(target);
+}
+
+function applyEditableVisual(id, target, resolved) {
+  const rendererComponent = resolved.layout.components.find((component) => component.type === 'mesh-renderer');
+  if (!rendererComponent) return;
+  target.visible = target.visible && rendererComponent.enabled;
+  applyQrAssetSelection(id, target, rendererComponent);
+  if (rendererComponent.material?.kind === 'inline') {
+    traverseOwnedRuntimeObject(target, (child) => {
+      if (!child.isMesh) return;
+      for (const material of Array.isArray(child.material) ? child.material : [child.material]) applyInlineMaterialDefinition(material, rendererComponent.material);
+    });
+  } else if (rendererComponent.material?.kind === 'embedded') {
+    for (const override of rendererComponent.material.overrides || []) {
+      traverseOwnedRuntimeObject(target, (child) => {
+        if (!child.isMesh) return;
+        for (const material of Array.isArray(child.material) ? child.material : [child.material]) {
+          if (material?.name === override.slot) applyInlineMaterialDefinition(material, override.material);
+        }
+      });
+    }
+  }
+}
+
+function createDynamicCapsuleGeometry(radius = 0.5, length = 1, capSegments = 8, radialSegments = 16) {
+  // Three r128 predates CapsuleGeometry. This is the same lathed profile used
+  // by current Three.js, so authored capsules keep the editor/generator shape.
+  const points = [];
+  for (let index = 0; index <= capSegments; index++) {
+    const angle = index / capSegments * Math.PI * 0.5;
+    points.push(new THREE.Vector2(Math.cos(angle) * radius, Math.sin(angle) * radius + length * 0.5));
+  }
+  for (let index = 1; index <= capSegments; index++) {
+    const angle = index / capSegments * Math.PI * 0.5 + Math.PI * 0.5;
+    points.push(new THREE.Vector2(Math.cos(angle) * radius, Math.sin(angle) * radius - length * 0.5));
+  }
+  const geometry = new THREE.LatheGeometry(points, radialSegments);
+  geometry.type = 'CapsuleGeometry';
+  geometry.parameters = { radius, length, capSegments, radialSegments };
+  return geometry;
+}
+
+function createDynamicPrimitiveGeometry(primitive) {
+  if (primitive === 'plane') return new THREE.PlaneGeometry(1, 1);
+  if (primitive === 'cube') return new THREE.BoxGeometry(1, 1, 1);
+  if (primitive === 'sphere') return new THREE.SphereGeometry(0.5, 32, 20);
+  if (primitive === 'cylinder') return new THREE.CylinderGeometry(0.5, 0.5, 2, 32);
+  if (primitive === 'capsule') return createDynamicCapsuleGeometry(0.5, 1, 8, 16);
+  throw new Error(`Unsupported primitive type ${primitive}`);
+}
+
+function createDynamicInlineMaterial(definition) {
+  const options = {
+    color: definition.baseColor,
+    opacity: definition.opacity,
+    transparent: definition.alphaMode === 'blend',
+    alphaTest: definition.alphaMode === 'mask' ? definition.alphaCutoff : 0,
+    depthWrite: definition.alphaMode !== 'blend',
+    side: definition.doubleSided ? THREE.DoubleSide : THREE.FrontSide,
+  };
+  const material = definition.shading === 'unlit'
+    ? new THREE.MeshBasicMaterial(options)
+    : new THREE.MeshStandardMaterial({ ...options, roughness: definition.roughness, metalness: definition.metalness });
+  material.name = 'GamePortInline';
+  return material;
+}
+
+function dynamicVisualSignature(layout) {
+  const rendererComponent = layout.components.find((component) => component.type === 'mesh-renderer');
+  return rendererComponent ? JSON.stringify({ source: rendererComponent.source, material: rendererComponent.material }) : 'empty';
+}
+
+function disposeDynamicEditableObject(id) {
+  const target = editableObjects.get(id);
+  if (target) {
+    // Dynamic children are separately registered objects. Detach them before
+    // disposing/rebuilding this root so their geometry and identity survive.
+    for (const child of [...target.children]) {
+      if (child.userData?.editorObjectId && dynamicEditableObjectIds.has(child.userData.editorObjectId)) scene.add(child);
+    }
+    if (target.parent) target.parent.remove(target);
+    target.traverse((child) => {
+      child.geometry?.dispose?.();
+      const materials = child.material ? (Array.isArray(child.material) ? child.material : [child.material]) : [];
+      for (const material of materials) {
+        material.map?.dispose?.();
+        material.dispose?.();
+      }
+    });
+  }
+  editableObjects.delete(id);
+  editableFallbackIds.delete(id);
+  editableLightTargets.delete(id);
+  dynamicEditableObjectIds.delete(id);
+  dynamicEditableVisualSignatures.delete(id);
+  if (studioAuthoring?.selectedId === id) studioAuthoring.selectedId = null;
+}
+
+function createDynamicEditableObject(layout, signature) {
+  const root = new THREE.Group();
+  root.name = layout.name;
+  root.userData.visualSource = 'empty';
+  const rendererComponent = layout.components.find((component) => component.type === 'mesh-renderer');
+  if (rendererComponent) {
+    const mesh = new THREE.Mesh(
+      createDynamicPrimitiveGeometry(rendererComponent.source.primitive),
+      createDynamicInlineMaterial(rendererComponent.material),
+    );
+    mesh.name = `${layout.name} Visual`;
+    root.userData.visualSource = `primitive:${rendererComponent.source.primitive}`;
+    root.add(mesh);
+  }
+  scene.add(root);
+  dynamicEditableObjectIds.add(layout.id);
+  dynamicEditableVisualSignatures.set(layout.id, signature);
+  registerEditableObject(layout.id, root);
+}
+
+function reconcileDynamicSceneObjects(document) {
+  if (!scene) return;
+  const desired = new Map(document.objects.filter((layout) => !FIXED_EDITABLE_IDS.has(layout.id)).map((layout) => [layout.id, layout]));
+  for (const id of [...dynamicEditableObjectIds]) {
+    if (!desired.has(id)) disposeDynamicEditableObject(id);
+  }
+  for (const [id, layout] of desired) {
+    const signature = dynamicVisualSignature(layout);
+    if (dynamicEditableVisualSignatures.get(id) !== signature || !editableObjects.has(id)) {
+      if (dynamicEditableObjectIds.has(id)) disposeDynamicEditableObject(id);
+      createDynamicEditableObject(layout, signature);
+    } else {
+      editableObjects.get(id).name = layout.name;
+    }
+  }
+  // Creation order is not a hierarchy contract. Once every requested root is
+  // registered, attach and transform each extra against its authored parent.
+  for (const id of desired.keys()) applyRegisteredObjectTransform(id);
+}
+
+function dynamicRuntimeParent(layout) {
+  if (!layout.parentId) return scene;
+  return editableObjects.get(layout.parentId)
+    ?? editableObjects.get(editableFallbackIds.get(layout.parentId))
+    ?? null;
+}
+
+function applyRegisteredObjectTransform(id) {
+  const target = editableObjects.get(id);
+  const resolved = editableWorldTransform(id);
+  if (!target || !resolved) return false;
+  if (dynamicEditableObjectIds.has(id)) {
+    const parent = dynamicRuntimeParent(resolved.layout);
+    if (parent) {
+      if (target.parent !== parent) parent.add(target);
+      applyLocalLayoutTransform(target, resolved.layout);
+    } else {
+      // Async fixed visuals (the imported crowd) may not be registered yet.
+      // Keep the authored world pose until registerEditableObject reattaches it.
+      if (target.parent !== scene) scene.add(target);
+      applyObjectTransform(target, resolved);
+    }
+  } else {
+    applyObjectTransform(target, resolved);
+  }
+  applyEditableLight(id, target, resolved);
+  applyEditableVisual(id, target, resolved);
+  return true;
+}
+
+function registerEditableObject(id, target, { fallbackId = null, lightTarget = null } = {}) {
+  target.userData.editorObjectId = id;
+  editableObjects.set(id, target);
+  if (fallbackId) editableFallbackIds.set(id, fallbackId);
+  if (lightTarget) editableLightTargets.set(id, lightTarget);
+  applyRegisteredObjectTransform(id);
+  // A dynamic child may have been loaded before this async fixed parent.
+  for (const dynamicId of dynamicEditableObjectIds) {
+    if (layoutObject(dynamicId)?.parentId === id) applyRegisteredObjectTransform(dynamicId);
+  }
+  return target;
+}
+
+function clearEditableRuntimeRegistry() {
+  for (const id of [...dynamicEditableObjectIds]) disposeDynamicEditableObject(id);
+  editableObjects.clear();
+  editableFallbackIds.clear();
+  editableLightTargets.clear();
+  dynamicEditableObjectIds.clear();
+  dynamicEditableVisualSignatures.clear();
+  runtimeColliders.length = 0;
+}
+
+function rebuildRuntimeColliders() {
+  runtimeColliders.length = 0;
+  if (!runtimeSceneDocument) return;
+  for (const layout of runtimeSceneDocument.objects) {
+    // main-camera's collider is the player body exported to generated engines;
+    // Zebra's own FPS collision pass must not treat that body as an obstacle.
+    if (layout.id === 'main-camera') continue;
+    const target = editableObjects.get(layout.id);
+    if (!target) continue;
+    for (const component of layout.components) {
+      if (component.type === 'box-collider' && component.enabled && !component.isTrigger) {
+        runtimeColliders.push({ id: layout.id, target, component });
+      }
+    }
+  }
+}
+
+function applySceneDocument(document, source) {
+  runtimeSceneDocument = document;
+  runtimeSceneSource = source;
+  rebuildRuntimeLayoutCaches(document);
+  reconcileDynamicSceneObjects(document);
+  for (const id of editableObjects.keys()) applyRegisteredObjectTransform(id);
+
+  const cameraLayout = layoutObject('main-camera');
+  const cameraWorld = runtimeWorldTransforms.get('main-camera');
+  if (cameraLayout && cameraWorld && camera) {
+    playerHeight = cameraWorld.position.y;
+    const cameraEuler = new THREE.Euler().setFromQuaternion(cameraWorld.quaternion, 'YXZ');
+    yaw = cameraEuler.y;
+    pitch = cameraEuler.x;
+    const cameraComponent = cameraLayout.components.find((component) => component.type === 'camera' && component.enabled);
+    if (cameraComponent) {
+      camera.fov = cameraComponent.verticalFov;
+      camera.near = cameraComponent.nearClip;
+      camera.far = cameraComponent.farClip;
+      camera.updateProjectionMatrix();
+    }
+  }
+
+  for (const weapon of weaponObjs) {
+    const layout = layoutObject(weapon.editorId);
+    if (layout && !weapon.collected) weapon.baseY = weapon.mesh.position.y;
+  }
+  rebuildRuntimeColliders();
+  refreshStudioAuthoringHelpers();
+  requestStudioEditorRender();
+}
+
+function hashText(value) {
+  let hash = 2166136261;
+  for (let index = 0; index < value.length; index++) {
+    hash ^= value.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+  return (hash >>> 0).toString(16).padStart(8, '0');
+}
+
+function textureVisualSignature(texture) {
+  if (!texture) return 'none';
+  if (!texture.userData) texture.userData = {};
+  if (texture.userData?.visualHash) return texture.userData.visualHash;
+  const image = texture.image;
+  let signature = `${texture.name || ''}:${image?.src || ''}:${image?.width || 0}x${image?.height || 0}`;
+  if (image && typeof image.getContext === 'function') {
+    try {
+      const data = image.getContext('2d').getImageData(0, 0, image.width, image.height).data;
+      let hash = 2166136261;
+      for (let index = 0; index < data.length; index++) {
+        hash ^= data[index];
+        hash = Math.imul(hash, 16777619);
+      }
+      signature = `canvas:${(hash >>> 0).toString(16).padStart(8, '0')}:${image.width}x${image.height}`;
+    } catch (_) {}
+  }
+  texture.userData.visualHash = hashText(signature);
+  return texture.userData.visualHash;
+}
+
+function runtimeObjectVisualFingerprint(id, target) {
+  if (!target) return '';
+  let meshes = 0;
+  let lights = 0;
+  const geometry = [];
+  const materials = [];
+  traverseOwnedRuntimeObject(target, (child) => {
+    if (child.userData?.studioHelper) return;
+    if (child.isLight) {
+      lights += 1;
+      materials.push(`light:${child.type}:${child.color?.getHexString?.() || ''}:${child.intensity ?? ''}`);
+    }
+    if (!child.isMesh) return;
+    meshes += 1;
+    const position = child.geometry?.attributes?.position;
+    geometry.push(`${child.geometry?.type || 'geometry'}:${position?.count || 0}:${child.geometry?.index?.count || 0}`);
+    for (const material of Array.isArray(child.material) ? child.material : [child.material]) {
+      if (!material) continue;
+      materials.push([
+        material.type,
+        material.name || '',
+        material.color?.getHexString?.() || '',
+        material.emissive?.getHexString?.() || '',
+        material.opacity,
+        material.transparent,
+        material.side,
+        textureVisualSignature(material.map),
+      ].join(':'));
+    }
+  });
+  return hashText(`${id}|${target.userData.visualSource || ''}|${meshes}|${lights}|${geometry.sort().join(',')}|${materials.sort().join(',')}`);
+}
+
+function runtimeVisualManifest() {
+  return [...editableObjects.entries()]
+    .map(([id, target]) => ({ id, fingerprint: runtimeObjectVisualFingerprint(id, target) }))
+    .sort((left, right) => left.id.localeCompare(right.id));
+}
+
+function runtimeVisualManifestHash() {
+  return hashText(runtimeVisualManifest().map((entry) => `${entry.id}:${entry.fingerprint}`).join('|'));
+}
+
+function runtimeRenderState() {
+  return {
+    threeRevision: THREE.REVISION,
+    contextToken: runtimeContextToken,
+    mode: studioAuthoring?.mode || 'standalone',
+    cameraView: studioAuthoring?.cameraView || 'game',
+    toneMapping: renderer?.toneMapping ?? null,
+    toneMappingExposure: renderer?.toneMappingExposure ?? null,
+    outputEncoding: renderer?.outputEncoding ?? null,
+    shadowMapEnabled: renderer?.shadowMap?.enabled ?? false,
+    shadowMapType: renderer?.shadowMap?.type ?? null,
+    fogType: scene?.fog?.isFogExp2 ? 'FogExp2' : scene?.fog?.isFog ? 'Fog' : null,
+    fogDensity: scene?.fog?.density ?? null,
+    visualManifestHash: runtimeVisualManifestHash(),
+  };
+}
+
+function requestStudioEditorRender() {
+  if (!studioAuthoring || studioAuthoring.renderPending) return;
+  studioAuthoring.renderPending = true;
+  requestAnimationFrame(() => {
+    if (!studioAuthoring || !renderer || !scene) return;
+    studioAuthoring.renderPending = false;
+    refreshStudioAuthoringHelpers();
+    const renderCamera = studioAuthoring.cameraView === 'game' ? camera : studioAuthoring.editorCamera;
+    renderer.render(scene, renderCamera);
+  });
+}
+
+function startStudioAuthoring() {
+  document.getElementById('start-screen').style.display = 'none';
+  document.getElementById('tutorial-overlay').style.display = 'none';
+  document.getElementById('hud').style.display = 'none';
+  clearEditableRuntimeRegistry();
+  initRenderer();
+  buildPersistentSceneObjects();
+  applySceneDocument(runtimeSceneDocument, runtimeSceneSource);
+  bindControls();
+
+  const editorCamera = new THREE.PerspectiveCamera(50, window.innerWidth / window.innerHeight, 0.05, 200);
+  editorCamera.position.set(11, 7.5, 13);
+  const badge = document.createElement('div');
+  badge.className = 'studio-authoring-badge';
+  badge.innerHTML = '<strong>EDITING ORIGINAL ZEBRA RENDERER</strong>Click to select · right-drag orbit · W/E/R tools · C camera<br><button type="button">Game camera</button>';
+  document.body.appendChild(badge);
+
+  studioAuthoring = {
+    mode: 'authoring',
+    cameraView: 'orbit',
+    editorCamera,
+    orbitTarget: new THREE.Vector3(0, 2, 0),
+    orbitYaw: Math.atan2(11, 13),
+    orbitPitch: 0.37,
+    orbitDistance: Math.hypot(11, 5.5, 13),
+    selectedId: null,
+    transformMode: 'translate',
+    selectionBox: null,
+    colliderHelper: null,
+    gizmo: null,
+    drag: null,
+    orbitDrag: null,
+    renderPending: false,
+    loopStarted: false,
+    controlsBound: true,
+    badge,
+  };
+  updateStudioOrbitCamera();
+  installStudioAuthoringInput();
+  badge.querySelector('button').addEventListener('click', toggleStudioCameraView);
+  setStudioAuthoringSelection(requestedStudioSelection);
+  setStudioAuthoringTransformMode(requestedStudioTransformMode);
+  postRuntimeBridge({
+    type: 'game-port-studio:scene-preview-applied',
+    objectCount: runtimeSceneDocument.objects.length,
+    contextToken: runtimeContextToken,
+    visualManifestHash: runtimeVisualManifestHash(),
+    renderState: runtimeRenderState(),
+  });
+  requestStudioEditorRender();
+}
+
+function installStudioAuthoringInput() {
+  const canvas = renderer.domElement;
+  const pointer = new THREE.Vector2();
+  const raycaster = new THREE.Raycaster();
+
+  const updatePointer = (event) => {
+    const rect = canvas.getBoundingClientRect();
+    pointer.set(
+      ((event.clientX - rect.left) / Math.max(1, rect.width)) * 2 - 1,
+      -((event.clientY - rect.top) / Math.max(1, rect.height)) * 2 + 1,
+    );
+  };
+
+  canvas.addEventListener('contextmenu', (event) => event.preventDefault());
+  canvas.addEventListener('pointerdown', (event) => {
+    if (!studioAuthoring || studioAuthoring.mode !== 'authoring') return;
+    if (event.button === 2 || event.button === 1) {
+      studioAuthoring.orbitDrag = { x: event.clientX, y: event.clientY, yaw: studioAuthoring.orbitYaw, pitch: studioAuthoring.orbitPitch };
+      canvas.setPointerCapture(event.pointerId);
+      return;
+    }
+    if (event.button !== 0) return;
+    updatePointer(event);
+    const activeCamera = studioAuthoring.cameraView === 'game' ? camera : studioAuthoring.editorCamera;
+    raycaster.setFromCamera(pointer, activeCamera);
+    const gizmoHit = studioAuthoring.gizmo?.visible
+      ? raycaster.intersectObjects(studioAuthoring.gizmo.children, true).find((hit) => hit.object.userData.gizmoAxis)
+      : null;
+    if (gizmoHit && studioAuthoring.selectedId) {
+      const layout = layoutObject(studioAuthoring.selectedId);
+      if (!layout || layout.locked) return;
+      studioAuthoring.drag = {
+        pointerId: event.pointerId,
+        startX: event.clientX,
+        startY: event.clientY,
+        axis: gizmoHit.object.userData.gizmoAxis,
+        transform: {
+          position: { ...layout.position },
+          rotation: { ...layout.rotation },
+          scale: { ...layout.scale },
+        },
+      };
+      canvas.setPointerCapture(event.pointerId);
+      postRuntimeBridge({ type: 'game-port-studio:transform-begin', objectId: studioAuthoring.selectedId });
+      return;
+    }
+    const candidates = [...editableObjects.values()].filter((object) => object.visible);
+    const hit = raycaster.intersectObjects(candidates, true).find((entry) => !entry.object.userData?.studioHelper);
+    let object = hit?.object || null;
+    while (object && !object.userData?.editorObjectId) object = object.parent;
+    const id = object?.userData?.editorObjectId || null;
+    setStudioAuthoringSelection(id);
+    postRuntimeBridge({ type: 'game-port-studio:editor-selected', objectId: id });
+  });
+
+  canvas.addEventListener('pointermove', (event) => {
+    if (!studioAuthoring || studioAuthoring.mode !== 'authoring') return;
+    if (studioAuthoring.orbitDrag) {
+      studioAuthoring.orbitYaw = studioAuthoring.orbitDrag.yaw - (event.clientX - studioAuthoring.orbitDrag.x) * 0.006;
+      studioAuthoring.orbitPitch = Math.max(-1.35, Math.min(1.35, studioAuthoring.orbitDrag.pitch + (event.clientY - studioAuthoring.orbitDrag.y) * 0.006));
+      updateStudioOrbitCamera();
+      requestStudioEditorRender();
+      return;
+    }
+    const drag = studioAuthoring.drag;
+    if (!drag || !studioAuthoring.selectedId) return;
+    const transform = {
+      position: { ...drag.transform.position },
+      rotation: { ...drag.transform.rotation },
+      scale: { ...drag.transform.scale },
+    };
+    const dx = event.clientX - drag.startX;
+    const dy = event.clientY - drag.startY;
+    if (studioAuthoring.transformMode === 'translate') {
+      const screenAxis = studioAxisScreenVector(studioAuthoring.selectedId, drag.axis);
+      const projected = (dx * screenAxis.x + dy * screenAxis.y) / Math.max(1, screenAxis.length * screenAxis.length);
+      transform.position[drag.axis] = drag.transform.position[drag.axis] + projected;
+    } else if (studioAuthoring.transformMode === 'rotate') {
+      transform.rotation[drag.axis] = drag.transform.rotation[drag.axis] + (dx - dy) * 0.45;
+    } else {
+      transform.scale[drag.axis] = Math.max(0.01, drag.transform.scale[drag.axis] + (dx - dy) * 0.01);
+    }
+    if (!applyStudioAuthoredTransform(studioAuthoring.selectedId, transform)) return;
+    postRuntimeBridge({ type: 'game-port-studio:transform-preview', objectId: studioAuthoring.selectedId, transform });
+  });
+
+  const finishPointer = (event) => {
+    if (!studioAuthoring) return;
+    studioAuthoring.orbitDrag = null;
+    const drag = studioAuthoring.drag;
+    studioAuthoring.drag = null;
+    if (drag && studioAuthoring.selectedId) {
+      const layout = layoutObject(studioAuthoring.selectedId);
+      if (layout) postRuntimeBridge({
+        type: 'game-port-studio:transform-commit',
+        objectId: studioAuthoring.selectedId,
+        transform: { position: { ...layout.position }, rotation: { ...layout.rotation }, scale: { ...layout.scale } },
+      });
+    }
+    if (canvas.hasPointerCapture?.(event.pointerId)) canvas.releasePointerCapture(event.pointerId);
+  };
+  canvas.addEventListener('pointerup', finishPointer);
+  canvas.addEventListener('pointercancel', finishPointer);
+  canvas.addEventListener('wheel', (event) => {
+    if (!studioAuthoring || studioAuthoring.mode !== 'authoring' || studioAuthoring.cameraView !== 'orbit') return;
+    event.preventDefault();
+    studioAuthoring.orbitDistance = Math.max(2, Math.min(80, studioAuthoring.orbitDistance * Math.exp(event.deltaY * 0.001)));
+    updateStudioOrbitCamera();
+    requestStudioEditorRender();
+  }, { passive: false });
+  document.addEventListener('keydown', (event) => {
+    if (!studioAuthoring || studioAuthoring.mode !== 'authoring') return;
+    if (event.code === 'KeyW') setStudioAuthoringTransformMode('translate');
+    if (event.code === 'KeyE') setStudioAuthoringTransformMode('rotate');
+    if (event.code === 'KeyR') setStudioAuthoringTransformMode('scale');
+    if (event.code === 'KeyC') toggleStudioCameraView();
+  });
+}
+
+function updateStudioOrbitCamera() {
+  if (!studioAuthoring) return;
+  const cp = Math.cos(studioAuthoring.orbitPitch);
+  studioAuthoring.editorCamera.position.set(
+    studioAuthoring.orbitTarget.x + Math.sin(studioAuthoring.orbitYaw) * cp * studioAuthoring.orbitDistance,
+    studioAuthoring.orbitTarget.y + Math.sin(studioAuthoring.orbitPitch) * studioAuthoring.orbitDistance,
+    studioAuthoring.orbitTarget.z + Math.cos(studioAuthoring.orbitYaw) * cp * studioAuthoring.orbitDistance,
+  );
+  studioAuthoring.editorCamera.lookAt(studioAuthoring.orbitTarget);
+  studioAuthoring.editorCamera.updateMatrixWorld(true);
+}
+
+function toggleStudioCameraView() {
+  if (!studioAuthoring || studioAuthoring.mode !== 'authoring') return;
+  studioAuthoring.cameraView = studioAuthoring.cameraView === 'orbit' ? 'game' : 'orbit';
+  const button = studioAuthoring.badge.querySelector('button');
+  if (button) button.textContent = studioAuthoring.cameraView === 'orbit' ? 'Game camera' : 'Orbit camera';
+  refreshStudioAuthoringHelpers();
+  requestStudioEditorRender();
+}
+
+function setStudioAuthoringSelection(id) {
+  if (!studioAuthoring) return;
+  studioAuthoring.selectedId = id && runtimeLayoutById.has(id) ? id : null;
+  refreshStudioAuthoringHelpers();
+  requestStudioEditorRender();
+}
+
+function setStudioAuthoringTransformMode(mode) {
+  if (!studioAuthoring || !['translate', 'rotate', 'scale'].includes(mode)) return;
+  studioAuthoring.transformMode = mode;
+  refreshStudioAuthoringHelpers();
+  requestStudioEditorRender();
+}
+
+function disposeStudioHelper(key) {
+  const helper = studioAuthoring?.[key];
+  if (!helper) return;
+  if (helper.parent) helper.parent.remove(helper);
+  helper.traverse((child) => {
+    child.geometry?.dispose?.();
+    const materials = child.material ? (Array.isArray(child.material) ? child.material : [child.material]) : [];
+    for (const material of materials) material.dispose?.();
+  });
+  studioAuthoring[key] = null;
+}
+
+function markStudioHelper(object) {
+  object.traverse((child) => {
+    child.userData.studioHelper = true;
+    if (child.material) {
+      for (const material of Array.isArray(child.material) ? child.material : [child.material]) {
+        material.depthTest = false;
+        material.depthWrite = false;
+      }
+      child.renderOrder = 1000;
+    }
+  });
+  return object;
+}
+
+function refreshStudioAuthoringHelpers() {
+  if (!studioAuthoring || !scene) return;
+  disposeStudioHelper('selectionBox');
+  disposeStudioHelper('colliderHelper');
+  disposeStudioHelper('gizmo');
+  if (studioAuthoring.mode !== 'authoring' || studioAuthoring.cameraView === 'game' || !studioAuthoring.selectedId) return;
+  const id = studioAuthoring.selectedId;
+  const target = editableObjects.get(id);
+  const resolved = editableWorldTransform(id);
+  const layout = layoutObject(id);
+  if (!resolved || !layout) return;
+  if (target && !new THREE.Box3().setFromObject(target).isEmpty()) {
+    const box = markStudioHelper(new THREE.BoxHelper(target, 0xb9ff77));
+    scene.add(box);
+    studioAuthoring.selectionBox = box;
+  }
+  const collider = layout.components.find((component) => component.type === 'box-collider' && component.enabled);
+  if (collider) {
+    const helper = markStudioHelper(new THREE.LineSegments(
+      new THREE.EdgesGeometry(new THREE.BoxGeometry(1, 1, 1)),
+      new THREE.LineBasicMaterial({ color: collider.isTrigger ? 0xffb454 : 0x67e8f9, transparent: true, opacity: 0.95 }),
+    ));
+    const local = new THREE.Matrix4().compose(
+      new THREE.Vector3(collider.center.x, collider.center.y, collider.center.z),
+      new THREE.Quaternion(),
+      new THREE.Vector3(collider.size.x, collider.size.y, collider.size.z),
+    );
+    const matrix = resolved.matrix.clone().multiply(local);
+    matrix.decompose(helper.position, helper.quaternion, helper.scale);
+    scene.add(helper);
+    studioAuthoring.colliderHelper = helper;
+  }
+  const gizmo = createStudioGizmo(studioAuthoring.transformMode);
+  gizmo.position.copy(resolved.position);
+  const distance = studioAuthoring.editorCamera.position.distanceTo(resolved.position);
+  gizmo.scale.setScalar(Math.max(0.55, Math.min(3.5, distance * 0.065)));
+  scene.add(gizmo);
+  studioAuthoring.gizmo = gizmo;
+}
+
+function createStudioGizmo(mode) {
+  const group = new THREE.Group();
+  const definitions = [
+    ['x', 0xff4b4b, new THREE.Vector3(1, 0, 0)],
+    ['y', 0x63e56f, new THREE.Vector3(0, 1, 0)],
+    ['z', 0x4d8dff, new THREE.Vector3(0, 0, 1)],
+  ];
+  for (const [axis, color, direction] of definitions) {
+    const material = new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.95 });
+    let handle;
+    if (mode === 'rotate') {
+      handle = new THREE.Mesh(new THREE.TorusGeometry(0.72, 0.035, 8, 48), material);
+      if (axis === 'x') handle.rotation.y = Math.PI / 2;
+      if (axis === 'y') handle.rotation.x = Math.PI / 2;
+    } else {
+      handle = new THREE.Group();
+      const shaft = new THREE.Mesh(new THREE.CylinderGeometry(0.025, 0.025, 0.62, 8), material);
+      shaft.position.y = 0.31;
+      const tip = mode === 'scale'
+        ? new THREE.Mesh(new THREE.BoxGeometry(0.13, 0.13, 0.13), material)
+        : new THREE.Mesh(new THREE.ConeGeometry(0.075, 0.2, 8), material);
+      tip.position.y = 0.72;
+      handle.add(shaft, tip);
+      handle.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), direction);
+    }
+    handle.userData.gizmoAxis = axis;
+    handle.traverse((child) => { child.userData.gizmoAxis = axis; });
+    group.add(handle);
+  }
+  return markStudioHelper(group);
+}
+
+function studioAxisScreenVector(id, axis) {
+  const target = editableObjects.get(id);
+  const layout = layoutObject(id);
+  if (!target || !layout || !studioAuthoring) return { x: 1, y: 0, length: 1 };
+  target.updateWorldMatrix(true, false);
+  const origin = target.getWorldPosition(new THREE.Vector3());
+  const axisVector = new THREE.Vector3(axis === 'x' ? 1 : 0, axis === 'y' ? 1 : 0, axis === 'z' ? 1 : 0);
+  if (layout.parentId) {
+    const parent = runtimeWorldTransforms.get(layout.parentId);
+    if (parent) {
+      const parentOrigin = new THREE.Vector3().applyMatrix4(parent.matrix);
+      axisVector.applyMatrix4(parent.matrix).sub(parentOrigin);
+    }
+  }
+  const activeCamera = studioAuthoring.cameraView === 'game' ? camera : studioAuthoring.editorCamera;
+  const start = origin.clone().project(activeCamera);
+  const end = origin.clone().add(axisVector).project(activeCamera);
+  const width = Math.max(1, renderer.domElement.clientWidth);
+  const height = Math.max(1, renderer.domElement.clientHeight);
+  const x = (end.x - start.x) * width / 2;
+  const y = -(end.y - start.y) * height / 2;
+  return { x, y, length: Math.hypot(x, y) };
+}
+
+function applyStudioAuthoredTransform(id, transform) {
+  const layout = layoutObject(id);
+  if (!layout || layout.locked) return false;
+  for (const group of ['position', 'rotation', 'scale']) {
+    for (const axis of ['x', 'y', 'z']) {
+      const value = transform[group]?.[axis];
+      const supported = Number.isFinite(value) && (
+        group === 'position' ? value >= -POSITION_LIMIT && value <= POSITION_LIMIT
+          : group === 'rotation' ? value >= -ROTATION_LIMIT && value <= ROTATION_LIMIT
+            : value >= SCALE_MIN && value <= SCALE_MAX
+      );
+      if (!supported) return false;
+    }
+  }
+  const nextDocument = {
+    ...runtimeSceneDocument,
+    objects: runtimeSceneDocument.objects.map((object) => object.id === id ? {
+      ...object,
+      position: { ...transform.position },
+      rotation: { ...transform.rotation },
+      scale: { ...transform.scale },
+    } : object),
+  };
+  applySceneDocument(nextDocument, 'live-editor');
+  return true;
+}
+
+function resetStudioGameplayState() {
+  gameActive = false;
+  mouseDown = false;
+  isLocked = false;
+  pointerLockFallback = false;
+  infoOpen = false;
+  milestoneShown = false;
+  score = 0;
+  currentWeapon = -1;
+  collected.clear();
+  if (document.pointerLockElement) document.exitPointerLock();
+  for (const id of ['tutorial-overlay', 'hud', 'info-panel', 'reward-screen', 'milestone-popup']) {
+    document.getElementById(id).style.display = 'none';
+  }
+  document.getElementById('score-value').textContent = '0';
+  document.getElementById('progress-fill').style.width = '0%';
+  document.getElementById('weapon-info').style.display = 'none';
+  for (let index = 0; index < 4; index++) document.getElementById(`slot-${index}`).className = 'wslot empty';
+  if (heldMesh) camera.remove(heldMesh);
+  heldMesh = null;
+  for (const collection of [particles, projectiles, ringWaves, scanMarkers]) {
+    for (const entry of collection) {
+      if (entry.mesh?.parent) entry.mesh.parent.remove(entry.mesh);
+    }
+  }
+  particles = []; projectiles = []; ringWaves = []; scanMarkers = [];
+  for (const weapon of weaponObjs) {
+    weapon.collected = false;
+    weapon.mesh.userData.runtimeStateVisible = true;
+    if (!weapon.mesh.parent) scene.add(weapon.mesh);
+    weapon.pl.intensity = 0.7;
+  }
+  for (const balloon of balloons) {
+    balloon.alive = true;
+    balloon.mesh.userData.runtimeStateVisible = true;
+    if (!balloon.mesh.parent) scene.add(balloon.mesh);
+  }
+  for (const qr of qrObjs) qr.scanned = false;
+  applySceneDocument(runtimeSceneDocument, runtimeSceneSource);
+}
+
+function setStudioRuntimeMode(mode) {
+  if (!studioAuthoring) return;
+  if (mode === 'playing') {
+    resetStudioGameplayState();
+    studioAuthoring.mode = 'playing';
+    studioAuthoring.cameraView = 'game';
+    studioAuthoring.badge.style.display = 'none';
+    refreshStudioAuthoringHelpers();
+    document.getElementById('tutorial-overlay').style.display = 'flex';
+    clock = new THREE.Clock();
+    simulationTime = 0;
+    if (!studioAuthoring.loopStarted) {
+      studioAuthoring.loopStarted = true;
+      animate();
+    }
+  } else if (mode === 'paused') {
+    studioAuthoring.mode = 'paused';
+    gameActive = false;
+  } else {
+    resetStudioGameplayState();
+    studioAuthoring.mode = 'authoring';
+    studioAuthoring.cameraView = 'orbit';
+    studioAuthoring.badge.style.display = '';
+    setStudioAuthoringSelection(requestedStudioSelection);
+    setStudioAuthoringTransformMode(requestedStudioTransformMode);
+    requestStudioEditorRender();
+  }
+  postRuntimeBridge({ type: 'game-port-studio:runtime-mode-applied', mode, contextToken: runtimeContextToken, renderState: runtimeRenderState() });
+}
+
+if (STUDIO_AUTHORING_MODE) {
+  window.__zebraStudioValidation = Object.freeze({
+    snapshot: () => ({
+      protocol: RUNTIME_BRIDGE_PROTOCOL,
+      revision: runtimeBridgeRevision,
+      contextToken: runtimeContextToken,
+      objectCount: editableObjects.size,
+      selectedObjectId: studioAuthoring?.selectedId || null,
+      renderState: runtimeRenderState(),
+      visualManifest: runtimeVisualManifest(),
+      dynamicObjectIds: [...dynamicEditableObjectIds].sort(),
+      qrTextureHashes: qrObjs.map((entry) => ({ id: entry.editorId, hash: textureVisualSignature(entry.g.children.find((child) => child.material?.map)?.material?.map) })),
+      crowd: {
+        seated: PROCEDURAL_CROWD_IDS.map((id) => runtimeObjectVisualFingerprint(id, editableObjects.get(id))).filter(Boolean),
+        imported: GLTF_CROWD_IDS.map((id) => runtimeObjectVisualFingerprint(id, editableObjects.get(id))).filter(Boolean),
+      },
+    }),
+    setCameraView: (view) => {
+      if (!studioAuthoring || !['orbit', 'game'].includes(view)) return false;
+      studioAuthoring.cameraView = view;
+      refreshStudioAuthoringHelpers();
+      requestStudioEditorRender();
+      return true;
+    },
+  });
+}
+
+async function startGame() {
   document.getElementById('start-screen').style.display = 'none';
   document.getElementById('tutorial-overlay').style.display = 'flex';
+  // Paint the tutorial immediately before the one-time procedural scene build.
+  await new Promise((resolve) => requestAnimationFrame(resolve));
+  clearEditableRuntimeRegistry();
   initRenderer();
-  buildScene();
-  spawnWeapons();
-  spawnBalloons(28);
-  placeQRCodes();
+  buildPersistentSceneObjects();
+  applySceneDocument(runtimeSceneDocument, runtimeSceneSource);
   bindControls();
   clock = new THREE.Clock();
+  simulationTime = 0;
   animate();
 }
 
@@ -711,8 +2170,6 @@ function dismissTutorial() {
 }
 
 function restartGame() {
-  const frame = document.getElementById('zebra-products-frame');
-  if (frame) frame.src = '';
   document.getElementById('reward-screen').style.display = 'none';
   score = 0; currentWeapon = -1; collected.clear();
   balloons = []; weaponObjs = []; qrObjs = []; particles = []; projectiles = []; ringWaves = []; scanMarkers = [];
@@ -726,12 +2183,12 @@ function restartGame() {
     s.className = 'wslot empty';
   }
   while (scene.children.length) scene.remove(scene.children[0]);
-  camera.position.set(0, PLAYER_H, 2);
+  clearEditableRuntimeRegistry();
+  scene.add(camera);
+  registerEditableObject('main-camera', camera);
   yaw = 0; pitch = 0;
-  buildScene();
-  spawnWeapons();
-  spawnBalloons(28);
-  placeQRCodes();
+  buildPersistentSceneObjects();
+  applySceneDocument(runtimeSceneDocument, runtimeSceneSource);
   gameActive = true;
 }
 
@@ -757,8 +2214,8 @@ function initRenderer() {
   buildEnvironment();
 
   camera = new THREE.PerspectiveCamera(72, window.innerWidth / window.innerHeight, 0.05, 150);
-  camera.position.set(0, PLAYER_H, 2);
   scene.add(camera);
+  registerEditableObject('main-camera', camera);
 
 
   window.addEventListener('resize', () => {
@@ -810,9 +2267,21 @@ function buildEnvironment() {
 // ═══════════════════════════════════════════════
 //  SCENE
 // ═══════════════════════════════════════════════
+function registerRuntimeCategoryRoots() {
+  for (const id of CATEGORY_ROOT_IDS) {
+    const root = new THREE.Object3D();
+    scene.add(root);
+    registerEditableObject(id, root);
+  }
+}
+
 function buildScene() {
+  registerRuntimeCategoryRoots();
+
   // Ambient — warm lantern glow
-  scene.add(new THREE.AmbientLight(0x2a1800, 0.5));
+  const ambient = new THREE.AmbientLight(0x2a1800, 0.5);
+  scene.add(ambient);
+  registerEditableObject('arena-ambient-light', ambient);
 
   // Main top spotlight — warm key light
   const topSpot = new THREE.SpotLight(0xfff0cc, 4.0, 65, Math.PI * 0.28, 0.35, 1);
@@ -820,11 +2289,18 @@ function buildScene() {
   topSpot.castShadow = true;
   topSpot.shadow.mapSize.set(1024, 1024);
   scene.add(topSpot); scene.add(topSpot.target);
+  registerEditableObject('arena-top-light', topSpot, { lightTarget: topSpot.target });
 
   // Rim lights around the ring — warm amber + cool fill
-  [[0xffaa44,8,12,0],[0xffaa44,-8,12,0],[0xffd080,0,12,8],[0x7799ff,0,12,-8]].forEach(([c,x,y,z]) => {
+  [
+    ['arena-rim-east', 0xffaa44, 8, 12, 0],
+    ['arena-rim-west', 0xffaa44, -8, 12, 0],
+    ['arena-rim-south', 0xffd080, 0, 12, 8],
+    ['arena-rim-north', 0x7799ff, 0, 12, -8],
+  ].forEach(([id,c,x,y,z]) => {
     const s = new THREE.SpotLight(c, 1.8, 45, Math.PI/4.5, 0.7);
     s.position.set(x, y, z); scene.add(s); scene.add(s.target);
+    registerEditableObject(id, s, { lightTarget: s.target });
   });
 
   // Sawdust floor texture
@@ -841,8 +2317,10 @@ function buildScene() {
   }
   const floorTex = new THREE.CanvasTexture(floorC);
   floorTex.wrapS = floorTex.wrapT = THREE.RepeatWrapping; floorTex.repeat.set(5,5);
-  const floor = new THREE.Mesh(new THREE.CircleGeometry(26,80), new THREE.MeshStandardMaterial({map:floorTex, roughness:0.95, metalness:0.0, envMapIntensity:0.35}));
-  floor.rotation.x = -Math.PI/2; floor.receiveShadow = true; scene.add(floor);
+  const floor = new THREE.Mesh(new THREE.CircleGeometry(0.5,80), new THREE.MeshStandardMaterial({map:floorTex, roughness:0.95, metalness:0.0, envMapIntensity:0.35}));
+  const floorRoot = new THREE.Group();
+  floor.rotation.x = -Math.PI/2; floor.receiveShadow = true; floorRoot.add(floor); scene.add(floorRoot);
+  registerEditableObject('arena-floor', floorRoot);
 
   // Packed dirt border ring (red clay)
   const dirtC = document.createElement('canvas'); dirtC.width = 256; dirtC.height = 256;
@@ -855,8 +2333,10 @@ function buildScene() {
   }
   const dirtTex = new THREE.CanvasTexture(dirtC);
   dirtTex.wrapS = dirtTex.wrapT = THREE.RepeatWrapping; dirtTex.repeat.set(4,4);
-  const ring = new THREE.Mesh(new THREE.RingGeometry(9,13,80), new THREE.MeshStandardMaterial({map:dirtTex,side:THREE.DoubleSide, roughness:0.98, metalness:0.0, envMapIntensity:0.3}));
-  ring.rotation.x = -Math.PI/2; ring.position.y = 0.01; scene.add(ring);
+  const ring = new THREE.Mesh(new THREE.RingGeometry(9/26,0.5,80), new THREE.MeshStandardMaterial({map:dirtTex,side:THREE.DoubleSide, roughness:0.98, metalness:0.0, envMapIntensity:0.3}));
+  const ringRoot = new THREE.Group();
+  ring.rotation.x = -Math.PI/2; ringRoot.add(ring); scene.add(ringRoot);
+  registerEditableObject('arena-dirt-ring', ringRoot);
 
   // Inner performance ring — brighter sawdust
   const inC = document.createElement('canvas'); inC.width = 512; inC.height = 512;
@@ -871,62 +2351,92 @@ function buildScene() {
   }
   const inTex = new THREE.CanvasTexture(inC);
   inTex.wrapS = inTex.wrapT = THREE.RepeatWrapping; inTex.repeat.set(3,3);
-  const inner = new THREE.Mesh(new THREE.CircleGeometry(9,64), new THREE.MeshStandardMaterial({map:inTex, roughness:0.9, metalness:0.0, envMapIntensity:0.4}));
-  inner.rotation.x = -Math.PI/2; inner.position.y = 0.02; scene.add(inner);
+  const inner = new THREE.Mesh(new THREE.CircleGeometry(0.5,64), new THREE.MeshStandardMaterial({map:inTex, roughness:0.9, metalness:0.0, envMapIntensity:0.4}));
+  const innerRoot = new THREE.Group();
+  inner.rotation.x = -Math.PI/2; innerRoot.add(inner); scene.add(innerRoot);
+  registerEditableObject('arena-performance-ring', innerRoot);
 
   // White chalk ring border
-  const chalk = new THREE.Mesh(new THREE.RingGeometry(8.9,9.2,80), new THREE.MeshBasicMaterial({color:0xffffff,side:THREE.DoubleSide,opacity:0.7,transparent:true}));
-  chalk.rotation.x = -Math.PI/2; chalk.position.y = 0.03; scene.add(chalk);
+  const chalk = new THREE.Mesh(new THREE.RingGeometry(8.9/18.4,0.5,80), new THREE.MeshBasicMaterial({color:0xffffff,side:THREE.DoubleSide,opacity:0.7,transparent:true}));
+  const chalkRoot = new THREE.Group();
+  chalk.rotation.x = -Math.PI/2; chalkRoot.add(chalk); scene.add(chalkRoot);
+  registerEditableObject('arena-chalk-ring', chalkRoot);
+
+  for (const side of ['north', 'south', 'west', 'east']) {
+    const boundary = new THREE.Object3D();
+    scene.add(boundary);
+    registerEditableObject(`arena-boundary-${side}`, boundary);
+  }
 
   buildTent();
   buildBleachers();
   addDecorations();
-  addStringLights();
   loadAndPlaceCrowd();
 }
 
 function loadAndPlaceCrowd() {
   const gltfLoader = new THREE.GLTFLoader();
-  const crowdFiles = ['a','b','c','d','e','f'];
-  const crowdModels = [];
-
+  // These GLBs contain their textures. The old person-a..f files reference
+  // absent external PNGs and produced a 404 for every crowd member.
+  const crowdFiles = ['char1','char2','char4','char6','man','worker'];
   const promises = crowdFiles.map(id =>
     new Promise(resolve => {
-      gltfLoader.load(`models/crowd/person-${id}.glb`, gltf => {
-        crowdModels.push(gltf.scene);
-        resolve();
-      }, undefined, () => resolve());
+      gltfLoader.load(`models/crowd/${id}.glb`, gltf => {
+        resolve(gltf.scene);
+      }, undefined, () => resolve(null));
     })
   );
 
-  Promise.all(promises).then(() => {
+  Promise.all(promises).then((loadedCrowdModels) => {
+    // Promise.all preserves crowdFiles order. The old completion-order push made
+    // the model assigned to a stable crowd slot depend on network timing.
+    const crowdModels = loadedCrowdModels.filter(Boolean);
     if (!crowdModels.length) return;
+    const crowdRandom = createSeededRandom(0x5eb2a123);
+    // The 40 authored seated spectators consume eight values each before the
+    // imported crowd's radius/scale stream begins.
+    for (let skipped = 0; skipped < 40 * 8; skipped++) crowdRandom();
     // Place crowd around the bleachers at radius ~11-13
     const total = 28;
     for (let i = 0; i < total; i++) {
       const angle = (i / total) * Math.PI * 2;
-      const radius = 11.5 + (Math.random() - 0.5) * 1.5;
+      const radius = 11.5 + (crowdRandom() - 0.5) * 1.5;
       const model = crowdModels[i % crowdModels.length].clone(true);
+      const root = new THREE.Group();
+      root.userData.visualSource = `crowd:${crowdFiles[i % crowdFiles.length]}`;
 
-      // Scale to ~1.8 units tall
+      // Normalize the reusable visual template to 1.2 units. The authored outer
+      // root scale is 1.5 with a small variation, producing the original ~1.8m
+      // crowd while keeping Studio and runtime transform semantics identical.
       const box = new THREE.Box3().setFromObject(model);
       const h = box.getSize(new THREE.Vector3()).y;
-      if (h > 0) model.scale.setScalar(1.8 / h);
+      if (h > 0) model.scale.setScalar(1.2 / h);
+      root.add(model);
 
-      model.position.set(
+      root.position.set(
         Math.cos(angle) * radius,
         0,
         Math.sin(angle) * radius
       );
       // Face inward toward center
-      model.rotation.y = angle + Math.PI;
+      root.rotation.y = angle + Math.PI;
 
       // Slight random scale variation for natural look
-      const s = 0.85 + Math.random() * 0.3;
-      model.scale.multiplyScalar(s);
+      const s = 0.85 + crowdRandom() * 0.3;
+      root.scale.setScalar(1.5 * s);
+      root.userData.crowdMember = true;
 
-      scene.add(model);
+      scene.add(root);
+      registerEditableObject(GLTF_CROWD_IDS[i], root);
     }
+    refreshStudioAuthoringHelpers();
+    postRuntimeBridge({
+      type: 'game-port-studio:scene-preview-applied',
+      objectCount: runtimeSceneDocument?.objects.length ?? editableObjects.size,
+      contextToken: runtimeContextToken,
+      visualManifestHash: runtimeVisualManifestHash(),
+    });
+    requestStudioEditorRender();
   });
 }
 
@@ -953,6 +2463,12 @@ function buildTent() {
   tentTex.wrapT = THREE.RepeatWrapping;
   tentTex.repeat.set(4, 2);
   const stripeMat = new THREE.MeshStandardMaterial({ map: tentTex, side: THREE.DoubleSide, roughness: 0.85, metalness: 0.0, envMapIntensity: 0.5 });
+  const tentRoot = new THREE.Group();
+  scene.add(tentRoot);
+  registerEditableObject('tent', tentRoot);
+  const tentDetailsRoot = new THREE.Group();
+  scene.add(tentDetailsRoot);
+  registerEditableObject('tent-details', tentDetailsRoot, { fallbackId: 'tent' });
 
   // Use the real Maya tent mesh when available
   if (loadedModels['Tent']) {
@@ -974,10 +2490,10 @@ function buildTent() {
         c.receiveShadow = true;
       }
     });
-    scene.add(tent);
-    buildTentPoles();
-    addStringLights();
-    makeZebraSign();
+    tentRoot.add(tent);
+    buildTentPoles(tentDetailsRoot);
+    addStringLights(tentDetailsRoot);
+    makeZebraSign(tentDetailsRoot);
     return;
   }
 
@@ -987,20 +2503,20 @@ function buildTent() {
   const wallMat = new THREE.MeshLambertMaterial({ map: tentTex, side: THREE.BackSide });
   const wall = new THREE.Mesh(wallGeo, wallMat);
   wall.position.y = 8.5;
-  scene.add(wall);
+  tentRoot.add(wall);
 
   // Roof cone
   const roofGeo = new THREE.ConeGeometry(24, 14, 48);
   const roof = new THREE.Mesh(roofGeo, stripeMat);
   roof.position.y = 24;
-  scene.add(roof);
+  tentRoot.add(roof);
 
   // Top spike + flag
   const spikeGeo = new THREE.ConeGeometry(0.4, 4, 8);
   const spikeMat = new THREE.MeshPhongMaterial({ color: 0xffd700, emissive: 0x886600 });
   const spike = new THREE.Mesh(spikeGeo, spikeMat);
   spike.position.y = 33;
-  scene.add(spike);
+  tentRoot.add(spike);
 
   // Zebra flag
   const flagC = document.createElement('canvas');
@@ -1014,13 +2530,14 @@ function buildTent() {
   const flagMat = new THREE.MeshBasicMaterial({ map: flagTex, side: THREE.DoubleSide });
   const flag = new THREE.Mesh(flagGeo, flagMat);
   flag.position.set(1, 35.5, 0);
-  scene.add(flag);
+  tentRoot.add(flag);
 
-  buildTentPoles();
-  makeZebraSign();
+  buildTentPoles(tentDetailsRoot);
+  addStringLights(tentDetailsRoot);
+  makeZebraSign(tentDetailsRoot);
 }
 
-function buildTentPoles() {
+function buildTentPoles(parent) {
   // Candy-stripe canvas
   const pc = document.createElement('canvas'); pc.width = 64; pc.height = 256;
   const pctx = pc.getContext('2d');
@@ -1038,17 +2555,17 @@ function buildTentPoles() {
     const x = Math.cos(a)*22, z = Math.sin(a)*22;
     // Pole shaft
     const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.13, 0.15, 19, 10), poleMat);
-    pole.position.set(x, 9.5, z); scene.add(pole);
+    pole.position.set(x, 9.5, z); parent.add(pole);
     // Metal base collar
     const collar = new THREE.Mesh(new THREE.CylinderGeometry(0.22, 0.25, 0.3, 10), baseMat);
-    collar.position.set(x, 0.15, z); scene.add(collar);
+    collar.position.set(x, 0.15, z); parent.add(collar);
     // Top finial
     const finial = new THREE.Mesh(new THREE.ConeGeometry(0.18, 0.5, 8), new THREE.MeshStandardMaterial({color:0xd4a800, roughness:0.25, metalness:0.95, envMapIntensity:1.2}));
-    finial.position.set(x, 19.3, z); scene.add(finial);
+    finial.position.set(x, 19.3, z); parent.add(finial);
   }
 }
 
-function makeZebraSign() {
+function makeZebraSign(parent) {
   const c = document.createElement('canvas');
   c.width = 600; c.height = 150;
   const ctx = c.getContext('2d');
@@ -1067,7 +2584,7 @@ function makeZebraSign() {
   const t = new THREE.CanvasTexture(c);
   const mesh = new THREE.Mesh(new THREE.PlaneGeometry(7,1.75), new THREE.MeshBasicMaterial({ map: t, side: THREE.DoubleSide }));
   mesh.position.set(0, 5.5, -17);
-  scene.add(mesh);
+  parent.add(mesh);
 }
 
 function buildBleachers() {
@@ -1079,44 +2596,64 @@ function buildBleachers() {
     const r = 14 + tier * 1.4;
     const y = tier * 0.55 + 0.28;
 
-    // Seat plank (flat torus = ring)
-    const seat = new THREE.Mesh(new THREE.TorusGeometry(r, 0.22, 3, 120), woodMat);
-    seat.rotation.x = Math.PI/2; seat.position.y = y; scene.add(seat);
+    // Keep the baked mesh orientation below an editable transform root. This
+    // mirrors the GLB shown in Studio, so applying the authored scale does not
+    // scale an already-sized ring or overwrite its flat orientation.
+    const seatRoot = new THREE.Group();
+    const seat = new THREE.Mesh(new THREE.TorusGeometry(14, 0.22, 3, 120), woodMat);
+    seat.rotation.x = Math.PI / 2;
+    seatRoot.add(seat);
+    seatRoot.position.y = y;
+    seatRoot.scale.set(r / 14, 1, r / 14);
+    scene.add(seatRoot);
+    registerEditableObject(BLEACHER_SEAT_IDS[tier], seatRoot);
 
-    // Riser face (vertical front of each tier)
-    const riser = new THREE.Mesh(new THREE.TorusGeometry(r, 0.12, 3, 120), darkWood);
-    riser.rotation.x = Math.PI/2; riser.position.y = y - 0.3; scene.add(riser);
+    const riserRoot = new THREE.Group();
+    const riser = new THREE.Mesh(new THREE.TorusGeometry(14, 0.12, 3, 120), darkWood);
+    riser.rotation.x = Math.PI / 2;
+    riserRoot.add(riser);
+    riserRoot.position.y = y - 0.3;
+    riserRoot.scale.set(r / 14, 1, r / 14);
+    scene.add(riserRoot);
+    registerEditableObject(BLEACHER_RISER_IDS[tier], riserRoot);
   }
 
   // Vertical support struts every ~22°
   for (let i = 0; i < 16; i++) {
     const a = (i/16)*Math.PI*2;
-    const strut = new THREE.Mesh(new THREE.BoxGeometry(0.1, 3.5, 0.1), metalMat);
-    strut.position.set(Math.cos(a)*17.5, 1.75, Math.sin(a)*17.5); scene.add(strut);
+    const strutRoot = new THREE.Group();
+    strutRoot.add(new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), metalMat));
+    strutRoot.position.set(Math.cos(a)*17.5, 1.75, Math.sin(a)*17.5);
+    strutRoot.scale.set(0.1, 3.5, 0.1);
+    scene.add(strutRoot);
+    registerEditableObject(BLEACHER_STRUT_IDS[i], strutRoot);
   }
   // Crowd silhouettes
+  const crowdRandom = createSeededRandom(0x5eb2a123);
   for (let i = 0; i < 40; i++) {
-    const a = (i/40)*Math.PI*2 + Math.random()*0.3;
-    const d = 14.5 + Math.random()*5.5;
-    addFigure(Math.cos(a)*d, Math.random()*2.5, Math.sin(a)*d);
+    const a = (i/40)*Math.PI*2 + crowdRandom()*0.3;
+    const d = 14.5 + crowdRandom()*5.5;
+    addFigure(Math.cos(a)*d, crowdRandom()*2.5, Math.sin(a)*d, i, crowdRandom);
   }
 }
 
-function addFigure(x, y, z) {
+function addFigure(x, y, z, index, crowdRandom = Math.random) {
   const g = new THREE.Group();
+  g.userData.visualSource = 'seated-spectator';
 
   const skinPalette  = [0xffdbac, 0xf5c5a3, 0xe0a882, 0xc68642, 0x8d5524, 0xd4a070];
   const shirtPalette = [0xff3333, 0x3366ff, 0x33cc55, 0xffaa00, 0xcc44cc, 0x00ccdd, 0xff6699, 0xffee33, 0xff7733, 0x44aaff];
   const pantsPalette = [0x1a1a33, 0x334455, 0x442211, 0x1e3a1e, 0x2a2a2a, 0x553311, 0x1a2a44];
   const hairPalette  = [0x2b1800, 0x111111, 0xc8960c, 0xb22222, 0x777777, 0xf0e0a0, 0x3b1f0a];
 
-  const rnd = arr => arr[Math.floor(Math.random() * arr.length)];
+  const rnd = arr => arr[Math.floor(crowdRandom() * arr.length)];
   const mat = c => new THREE.MeshLambertMaterial({ color: c });
 
   const skinCol  = rnd(skinPalette);
   const shirtCol = rnd(shirtPalette);
   const pantsCol = rnd(pantsPalette);
   const hairCol  = rnd(hairPalette);
+  g.userData.palette = { skin: skinCol, shirt: shirtCol, pants: pantsCol, hair: hairCol };
 
   const mSkin  = mat(skinCol);
   const mShirt = mat(shirtCol);
@@ -1181,9 +2718,10 @@ function addFigure(x, y, z) {
   }
 
   // Face toward center of ring, with a little random wobble
-  g.rotation.y = Math.atan2(x, z) + Math.PI + (Math.random() - 0.5) * 0.3;
+  g.rotation.y = Math.atan2(x, z) + Math.PI + (crowdRandom() - 0.5) * 0.3;
   g.position.set(x, y, z);
   scene.add(g);
+  registerEditableObject(PROCEDURAL_CROWD_IDS[index], g);
 }
 
 function addDecorations() {
@@ -1191,36 +2729,53 @@ function addDecorations() {
   const metalMat = new THREE.MeshLambertMaterial({ color: 0x333333 });
   const goldMat  = new THREE.MeshLambertMaterial({ color: 0xd4a800 });
 
-  // Trapeze bar + ropes
-  const tbar = new THREE.Mesh(new THREE.CylinderGeometry(0.04,0.04,5,8), woodMat);
-  tbar.rotation.z = Math.PI/2; tbar.position.y = 17; scene.add(tbar);
-  for (const s of [-2.5,2.5]) {
-    const rope = new THREE.Mesh(new THREE.CylinderGeometry(0.015,0.015,9,4), new THREE.MeshLambertMaterial({color:0xb89040}));
-    rope.position.set(s,21.5,0); scene.add(rope);
+  // Trapeze geometry uses the same unit cylinder as Studio. Authored roots
+  // carry all placement and sizing, keeping runtime and editor transforms 1:1.
+  const tbar = new THREE.Group();
+  tbar.add(new THREE.Mesh(new THREE.CylinderGeometry(0.5, 0.5, 2, 8), woodMat));
+  tbar.rotation.z = Math.PI / 2;
+  tbar.position.y = 17;
+  tbar.scale.set(0.08, 2.5, 0.08);
+  scene.add(tbar);
+  registerEditableObject('trapeze-bar', tbar);
+  for (const [id, s] of [['trapeze-rope-left', -2.5], ['trapeze-rope-right', 2.5]]) {
+    const rope = new THREE.Group();
+    rope.add(new THREE.Mesh(
+      new THREE.CylinderGeometry(0.5, 0.5, 2, 4),
+      new THREE.MeshLambertMaterial({ color: 0xb89040 }),
+    ));
+    rope.position.set(s, 21.5, 0);
+    rope.scale.set(0.03, 4.5, 0.03);
+    scene.add(rope);
+    registerEditableObject(id, rope);
   }
 
   // Wooden barrels (4 corners of the ring)
   for (let i = 0; i < 4; i++) {
-    const a = (i/4)*Math.PI*2 + Math.PI/4;
-    const bx = Math.cos(a)*7.2, bz = Math.sin(a)*7.2;
+    const barrel = new THREE.Group();
     // Stave body
-    const body = new THREE.Mesh(new THREE.CylinderGeometry(0.42,0.42,0.85,14), woodMat);
-    body.position.set(bx,0.425,bz); scene.add(body);
+    const body = new THREE.Mesh(new THREE.CylinderGeometry(0.5,0.5,1,14), woodMat);
+    barrel.add(body);
     // Metal bands
-    for (const by of [0.15,0.42,0.7]) {
-      const band = new THREE.Mesh(new THREE.TorusGeometry(0.44,0.028,5,20), metalMat);
-      band.rotation.x = Math.PI/2; band.position.set(bx,by,bz); scene.add(band);
+    for (const by of [-0.3235,-0.0059,0.3235]) {
+      const band = new THREE.Mesh(new THREE.TorusGeometry(0.524,0.0333,5,20), metalMat);
+      band.rotation.x = Math.PI/2; band.position.y = by; barrel.add(band);
     }
     // Lid
-    const lid = new THREE.Mesh(new THREE.CylinderGeometry(0.42,0.42,0.055,14), woodMat);
-    lid.position.set(bx,0.88,bz); scene.add(lid);
+    const lid = new THREE.Mesh(new THREE.CylinderGeometry(0.5,0.5,0.0647,14), woodMat);
+    lid.position.y = 0.5353; barrel.add(lid);
+    scene.add(barrel);
+    registerEditableObject(`barrel-${i}`, barrel);
   }
 
   // Performer's podium center-stage
-  const podium = new THREE.Mesh(new THREE.CylinderGeometry(0.55,0.65,1.1,16), woodMat);
-  podium.position.set(0,0.55,-2.5); scene.add(podium);
-  const podTop = new THREE.Mesh(new THREE.CylinderGeometry(0.58,0.58,0.07,16), goldMat);
-  podTop.position.set(0,1.13,-2.5); scene.add(podTop);
+  const podiumRoot = new THREE.Group();
+  const podium = new THREE.Mesh(new THREE.CylinderGeometry(0.423,0.5,1,16), woodMat);
+  podiumRoot.add(podium);
+  const podTop = new THREE.Mesh(new THREE.CylinderGeometry(0.446,0.446,0.064,16), goldMat);
+  podTop.position.y = 0.527; podiumRoot.add(podTop);
+  scene.add(podiumRoot);
+  registerEditableObject('center-plinth', podiumRoot);
 
   // Triangle bunting flags strung pole-to-pole
   const buntingCols = [0xcc0000,0xffffff,0xcc0000,0xffffff,0xcc0000,0xffffff,0xcc0000,0xffffff];
@@ -1233,17 +2788,22 @@ function addDecorations() {
       const t = s/segments, t2 = (s+1)/segments;
       const fx = x0+(x1-x0)*((t+t2)/2), fz = z0+(z1-z0)*((t+t2)/2);
       const sag = Math.sin((t+t2)/2*Math.PI)*1.2;
+      const flagRoot = new THREE.Group();
       const flag = new THREE.Mesh(
         new THREE.ConeGeometry(0.25,0.55,3),
         new THREE.MeshLambertMaterial({color:buntingCols[s%buntingCols.length],side:THREE.DoubleSide})
       );
-      flag.position.set(fx, 19-sag, fz);
-      flag.rotation.x = Math.PI; scene.add(flag);
+      flag.rotation.x = Math.PI;
+      flagRoot.add(flag);
+      flagRoot.position.set(fx, 19-sag, fz);
+      flagRoot.rotation.y = Math.atan2(x1 - x0, z1 - z0);
+      scene.add(flagRoot);
+      registerEditableObject(BUNTING_IDS[i * segments + s], flagRoot);
     }
   }
 }
 
-function addStringLights() {
+function addStringLights(parent) {
   const cols = [0xff2020,0x22ff22,0x2222ff,0xffff22,0xff22ff,0x22ffff];
   for (let r = 0; r < 4; r++) {
     const rad = 8 + r*3.5, h = 13 - r*1.5, cnt = 18+r*10;
@@ -1253,7 +2813,7 @@ function addStringLights() {
       const bMat = new THREE.MeshBasicMaterial({ color: cols[Math.floor(Math.random()*cols.length)] });
       const b = new THREE.Mesh(bGeo, bMat);
       b.position.set(Math.cos(a)*rad, h, Math.sin(a)*rad);
-      scene.add(b);
+      parent.add(b);
     }
   }
 }
@@ -1371,10 +2931,11 @@ function addWeaponLabel(group, w) {
 function spawnWeapons() {
   WEAPONS.forEach((w, i) => {
     const mesh = makeWeaponMesh(w);
+    mesh.userData.visualSource = `weapon:${w.id}`;
+    const editorId = `weapon-${w.id.toLowerCase()}`;
     const a = (i / WEAPONS.length) * Math.PI * 2;
     const d = 5 + (i%3)*1.5;
     mesh.position.set(Math.cos(a)*d, 0.45, Math.sin(a)*d);
-    mesh.rotation.y = Math.random()*Math.PI*2;
 
     const geoGlow = new THREE.SphereGeometry(0.5,8,8);
     const matGlow = new THREE.MeshBasicMaterial({color:w.accent,transparent:true,opacity:0.08});
@@ -1382,11 +2943,12 @@ function spawnWeapons() {
     mesh.add(glow);
 
     const pl = new THREE.PointLight(w.accent, 0.7, 2.5);
-    pl.position.copy(mesh.position);
-    scene.add(pl);
+    pl.position.set(0, 0, 0);
+    mesh.add(pl);
     scene.add(mesh);
+    registerEditableObject(editorId, mesh);
 
-    weaponObjs.push({ mesh, w, pl, collected:false, bob:Math.random()*Math.PI*2 });
+    weaponObjs.push({ mesh, w, pl, collected:false, bob:Math.random()*Math.PI*2, editorId, baseY:mesh.position.y });
   });
 }
 
@@ -1457,9 +3019,12 @@ function makeBarcodeTexture(type, seed) {
   return new THREE.CanvasTexture(c);
 }
 
-function makeBalloon() {
-  const color = BAL_COLORS[Math.floor(Math.random()*BAL_COLORS.length)];
+function makeBalloon(index) {
+  // Match the editor asset cycle so a balloon keeps the same authored colour
+  // in runtime, Studio, reloads, and deterministic visual tests.
+  const color = BAL_COLORS[index % BAL_COLORS.length];
   const g = new THREE.Group();
+  g.userData.visualSource = `balloon:${index}:${BARCODE_TYPES[index % BARCODE_TYPES.length]}`;
   const bMat = new THREE.MeshPhongMaterial({ color, shininess:120, specular:0xffffff });
   const balloon = new THREE.Mesh(new THREE.SphereGeometry(0.38,16,16), bMat);
   balloon.scale.y = 1.28; g.add(balloon);
@@ -1469,10 +3034,10 @@ function makeBalloon() {
   str.position.y=-1.2; g.add(str);
 
   // Scannable barcode tag — random symbology, billboarded toward the player each frame
-  const type = BARCODE_TYPES[Math.floor(Math.random()*BARCODE_TYPES.length)];
+  const type = BARCODE_TYPES[index % BARCODE_TYPES.length];
   const tag = new THREE.Mesh(
     new THREE.PlaneGeometry(0.34, 0.34),
-    new THREE.MeshBasicMaterial({ map: makeBarcodeTexture(type, (Math.random()*1e9)|0) })
+    new THREE.MeshBasicMaterial({ map: makeBarcodeTexture(type, 0xba110000 + index) })
   );
   tag.position.set(0, 0.05, 0.42);
   g.add(tag);
@@ -1482,23 +3047,33 @@ function makeBalloon() {
 
 function spawnBalloons(n) {
   for (let i = 0; i < n; i++) {
-    const b = makeBalloon();
+    const b = makeBalloon(i);
     const a = Math.random()*Math.PI*2, d = Math.random()*17+1;
     b.position.set(Math.cos(a)*d, 2+Math.random()*9, Math.sin(a)*d);
+    b.userData.runtimeStateVisible = true;
     scene.add(b);
-    balloons.push({ mesh:b, bob:Math.random()*Math.PI*2, spd:0.4+Math.random()*0.6, alive:true, da:Math.random()*Math.PI*2, ds:(Math.random()-0.5)*0.008 });
+    const editorId = BALLOON_IDS[i];
+    registerEditableObject(editorId, b);
+    balloons.push({ mesh:b, editorId, bob:Math.random()*Math.PI*2, spd:0.4+Math.random()*0.6, alive:true, da:Math.random()*Math.PI*2, ds:(Math.random()-0.5)*0.008 });
   }
 }
 
 function respawnBalloon(bo) {
-  const a = Math.random()*Math.PI*2, d = Math.random()*17+1;
-  bo.mesh.position.set(Math.cos(a)*d, 2+Math.random()*9, Math.sin(a)*d);
-  bo.mesh.scale.set(1,1,1); bo.mesh.visible=true; bo.alive=true;
+  bo.mesh.userData.runtimeStateVisible = true;
+  if (!applyRegisteredObjectTransform(bo.editorId)) {
+    const a = Math.random()*Math.PI*2, d = Math.random()*17+1;
+    bo.mesh.position.set(Math.cos(a)*d, 2+Math.random()*9, Math.sin(a)*d);
+    bo.mesh.scale.set(1,1,1);
+    bo.mesh.visible = true;
+  }
+  bo.alive=true;
 }
 
 function popBalloon(bo, weapon) {
   if (!bo.alive) return;
-  bo.alive = false; bo.mesh.visible = false;
+  bo.alive = false;
+  bo.mesh.userData.runtimeStateVisible = false;
+  bo.mesh.visible = false;
   const pos = bo.mesh.position.clone();
   const color = bo.mesh.children[0].material.color.getHex();
 
@@ -1593,6 +3168,16 @@ function makeQRTexture(w) {
   return new THREE.CanvasTexture(c);
 }
 
+function makeQRLabelTexture(w) {
+  const canvas = document.createElement('canvas');
+  canvas.width = 300; canvas.height = 70;
+  const context = canvas.getContext('2d');
+  context.fillStyle = '#000'; context.fillRect(0, 0, 300, 70);
+  context.fillStyle = '#e8c840'; context.font = 'bold 24px Arial';
+  context.textAlign = 'center'; context.fillText(w.name, 150, 45);
+  return new THREE.CanvasTexture(canvas);
+}
+
 function placeQRCodes() {
   WEAPONS.forEach((w, i) => {
     // Place each QR code right beside its weapon so it's easy to find.
@@ -1607,12 +3192,14 @@ function placeQRCodes() {
     const z = Math.sin(a) * d;
 
     const g = new THREE.Group();
+    g.userData.visualSource = `qr-board:${w.id}`;
 
     // Board
     const board = new THREE.Mesh(
       new THREE.BoxGeometry(1.6, 1.6, 0.06),
       new THREE.MeshLambertMaterial({ color: 0x111111 })
     );
+    board.material.name = 'Board';
     g.add(board);
 
     // QR face
@@ -1620,21 +3207,16 @@ function placeQRCodes() {
       new THREE.PlaneGeometry(1.4, 1.4),
       new THREE.MeshBasicMaterial({ map: makeQRTexture(w) })
     );
+    qr.material.name = 'QrFace';
     qr.position.z = 0.035;
     g.add(qr);
 
     // Label strip
-    const lc = document.createElement('canvas');
-    lc.width = 300; lc.height = 70;
-    const lctx = lc.getContext('2d');
-    lctx.fillStyle = '#000'; lctx.fillRect(0, 0, 300, 70);
-    lctx.fillStyle = '#e8c840'; lctx.font = 'bold 24px Arial';
-    lctx.textAlign = 'center'; lctx.fillText(w.name, 150, 45);
-    const lt = new THREE.CanvasTexture(lc);
     const lm = new THREE.Mesh(
       new THREE.PlaneGeometry(1.6, 0.42),
-      new THREE.MeshBasicMaterial({ map: lt })
+      new THREE.MeshBasicMaterial({ map: makeQRLabelTexture(w) })
     );
+    lm.material.name = 'Label';
     lm.position.set(0, 1.01, 0.035);
     g.add(lm);
 
@@ -1643,28 +3225,50 @@ function placeQRCodes() {
       new THREE.CylinderGeometry(0.05, 0.06, h, 8),
       new THREE.MeshLambertMaterial({ color: 0x333333 })
     );
+    post.material.name = 'Post';
     post.position.y = -(h / 2 + 0.8);
     g.add(post);
 
     g.position.set(x, h + 0.8, z);
     g.lookAt(0, h + 0.8, 0);
     scene.add(g);
-    qrObjs.push({ g, w, scanned: false });
+    const editorId = `qr-${w.id.toLowerCase()}`;
+    qrObjs.push({ g, w, scanned: false, editorId });
+    registerEditableObject(editorId, g);
   });
 }
 
 // ═══════════════════════════════════════════════
 //  CONTROLS
 // ═══════════════════════════════════════════════
+function requestGamePointerLock() {
+  const canvas = document.getElementById('game-canvas');
+  if (!canvas || document.pointerLockElement === canvas) return;
+  if (typeof canvas.requestPointerLock !== 'function') {
+    pointerLockFallback = true;
+    return;
+  }
+
+  try {
+    const request = canvas.requestPointerLock();
+    if (request && typeof request.catch === 'function') {
+      request.catch(() => { pointerLockFallback = true; });
+    }
+  } catch {
+    pointerLockFallback = true;
+  }
+}
+
 function bindControls() {
   const canvas = document.getElementById('game-canvas');
 
   canvas.addEventListener('click', () => {
-    if (!infoOpen && gameActive) canvas.requestPointerLock();
+    if (!infoOpen && gameActive) requestGamePointerLock();
   });
 
   document.addEventListener('pointerlockchange', () => {
     isLocked = document.pointerLockElement === canvas;
+    if (isLocked) pointerLockFallback = false;
   });
 
   document.addEventListener('mousemove', e => {
@@ -1685,13 +3289,13 @@ function bindControls() {
 
   document.addEventListener('keydown', e => {
     keys[e.code] = true;
-    if (e.code==='KeyE') tryPickup();
-    if (e.code==='Digit1') trySwitch(0);
-    if (e.code==='Digit2') trySwitch(1);
-    if (e.code==='Digit3') trySwitch(2);
-    if (e.code==='Digit4') trySwitch(3);
-    if (e.code==='Digit5') trySwitch(4);
-    if (e.code==='Digit6') trySwitch(5);
+    if (gameActive && e.code==='KeyE') tryPickup();
+    if (gameActive && e.code==='Digit1') trySwitch(0);
+    if (gameActive && e.code==='Digit2') trySwitch(1);
+    if (gameActive && e.code==='Digit3') trySwitch(2);
+    if (gameActive && e.code==='Digit4') trySwitch(3);
+    if (gameActive && e.code==='Digit5') trySwitch(4);
+    if (gameActive && e.code==='Digit6') trySwitch(5);
     if (e.code==='Escape') closeInfo();
   });
   document.addEventListener('keyup', e => { keys[e.code]=false; });
@@ -1717,6 +3321,7 @@ function pickupWeapon(obj) {
   let t=0;
   const startY = obj.mesh.position.y;
   const go = () => {
+    if (STUDIO_AUTHORING_MODE && studioAuthoring?.mode !== 'playing') return;
     t+=0.06;
     if (t<=1) {
       obj.mesh.position.y = startY + t*0.6;
@@ -1985,7 +3590,7 @@ function scanQR(qObj) {
   specEl.innerHTML = '';
   w.specs.forEach(s => { const li = document.createElement('li'); li.textContent = s; specEl.appendChild(li); });
   document.getElementById('prod-effect').textContent = w.effectDesc;
-  document.getElementById('prod-visit-btn').onclick = () => window.open(w.url, '_blank');
+  document.getElementById('prod-visit-btn').onclick = () => window.open(w.url, '_blank', 'noopener,noreferrer');
 
   document.getElementById('info-panel').style.display = 'block';
   infoOpen = true;
@@ -1998,9 +3603,16 @@ function scanQR(qObj) {
   }
 }
 
-function closeInfo() {
+function closeInfo({ resumeGame = false } = {}) {
   document.getElementById('info-panel').style.display = 'none';
   infoOpen = false;
+  // Closing with the on-screen X is a user gesture, so pointer lock can be
+  // restored immediately. Without this, movement remains gated by isLocked
+  // until the player discovers they need to click the canvas again.
+  if (resumeGame && gameActive) {
+    const canvas = document.getElementById('game-canvas');
+    if (document.pointerLockElement !== canvas) requestGamePointerLock();
+  }
 }
 
 // ═══════════════════════════════════════════════
@@ -2022,9 +3634,6 @@ function showReward() {
   document.getElementById('final-score-val').textContent = score;
   document.getElementById('reward-screen').style.display='flex';
   if(document.pointerLockElement) document.exitPointerLock();
-  const frame = document.getElementById('zebra-products-frame');
-  if (frame) frame.src = 'https://www.zebra.com/us/en/products.html';
-  setTimeout(() => window.open('https://www.zebra.com/us/en/products.html', '_blank'), 800);
 }
 
 
@@ -2060,8 +3669,18 @@ function showFloatingScore(pts) {
 // ═══════════════════════════════════════════════
 function animate() {
   requestAnimationFrame(animate);
-  const delta = clock.getDelta();
-  const t = clock.getElapsedTime();
+  if (STUDIO_AUTHORING_MODE && studioAuthoring?.mode !== 'playing') {
+    const renderCamera = studioAuthoring.cameraView === 'game' ? camera : studioAuthoring.editorCamera;
+    renderer.render(scene, renderCamera);
+    return;
+  }
+  const delta = Math.min(0.05, clock.getDelta());
+  simulationTime += delta;
+  updateGame(delta, simulationTime);
+  renderer.render(scene,camera);
+}
+
+function updateGame(delta, t) {
 
   // Camera rotation
   camera.rotation.order='YXZ';
@@ -2069,24 +3688,24 @@ function animate() {
   camera.rotation.x=pitch;
 
   // Player move
-  if(isLocked && gameActive) movePlayer(delta);
+  if((isLocked || pointerLockFallback) && gameActive && !infoOpen) movePlayer(delta);
 
   // Auto-fire for rapid weapon
   if(mouseDown && gameActive && !infoOpen && currentWeapon>=0 && WEAPONS[currentWeapon].effect==='rapid') {
     shoot();
   }
 
-  // Weapon bob
-  weaponObjs.forEach(o=>{
+  // Persistent authored visuals stay frozen until gameplay actually begins.
+  // Studio can therefore compare authoring Game Camera and Play at t=0.
+  if (gameActive) weaponObjs.forEach(o=>{
     if(o.collected) return;
-    o.mesh.position.y = 0.45+Math.sin(t*1.6+o.bob)*0.1;
+    o.mesh.position.y = o.baseY+Math.sin(t*1.6+o.bob)*0.1;
     o.mesh.rotation.y += 0.018;
     o.pl.intensity = 0.6+Math.sin(t*2.5+o.bob)*0.35;
     if(camera.position.distanceTo(o.mesh.position)<2.6) showPrompt('Press E — pick up '+o.w.name,80);
   });
 
-  // Balloon animation
-  balloons.forEach(b=>{
+  if (gameActive) balloons.forEach(b=>{
     if(!b.alive) return;
     b.mesh.position.y += Math.sin(t*b.spd+b.bob)*0.003;
     b.mesh.position.x += Math.cos(t*0.18+b.da)*0.003;
@@ -2170,11 +3789,35 @@ function animate() {
     heldMesh.position.y=-0.36+Math.sin(t*3)*0.005;
   }
 
-  renderer.render(scene,camera);
+}
+
+function playerIntersectsCollider(worldPosition, collider) {
+  const { target, component } = collider;
+  if (!target || !target.parent) return false;
+  target.updateWorldMatrix(true, false);
+  const localPlayer = target.worldToLocal(new THREE.Vector3(
+    worldPosition.x,
+    worldPosition.y - playerHeight * 0.5,
+    worldPosition.z,
+  ));
+  const worldScale = target.getWorldScale(new THREE.Vector3());
+  const localRadiusX = 0.32 / Math.max(Math.abs(worldScale.x), 0.0001);
+  const localRadiusZ = 0.32 / Math.max(Math.abs(worldScale.z), 0.0001);
+  const localHalfHeight = playerHeight * 0.5 / Math.max(Math.abs(worldScale.y), 0.0001);
+  const halfX = component.size.x * 0.5;
+  const halfY = component.size.y * 0.5;
+  const halfZ = component.size.z * 0.5;
+  return Math.abs(localPlayer.x - component.center.x) < halfX + localRadiusX
+    && Math.abs(localPlayer.y - component.center.y) < halfY + localHalfHeight
+    && Math.abs(localPlayer.z - component.center.z) < halfZ + localRadiusZ;
+}
+
+function canPlayerOccupy(worldPosition) {
+  return !runtimeColliders.some((collider) => playerIntersectsCollider(worldPosition, collider));
 }
 
 function movePlayer(delta) {
-  const spd = 5 * delta;
+  const spd = 6 * delta;
   const fwd = new THREE.Vector3(-Math.sin(yaw),0,-Math.cos(yaw));
   const right= new THREE.Vector3(Math.cos(yaw),0,-Math.sin(yaw));
   const mv = new THREE.Vector3();
@@ -2186,11 +3829,111 @@ function movePlayer(delta) {
 
   if(mv.length()>0){
     mv.normalize().multiplyScalar(spd);
-    const np=camera.position.clone().add(mv);
-    if(Math.sqrt(np.x**2+np.z**2)<21) camera.position.add(mv);
+    const nextX = camera.position.clone();
+    nextX.x += mv.x;
+    if (canPlayerOccupy(nextX)) camera.position.x = nextX.x;
+    const nextZ = camera.position.clone();
+    nextZ.z += mv.z;
+    if (canPlayerOccupy(nextZ)) camera.position.z = nextZ.z;
   }
-  camera.position.y=PLAYER_H;
+  camera.position.y=playerHeight;
 }
+
+function gameMode() {
+  if (document.getElementById('loading-screen').style.display !== 'none') return 'loading';
+  if (document.getElementById('reward-screen').style.display === 'flex') return 'reward';
+  if (document.getElementById('tutorial-overlay').style.display === 'flex') return 'tutorial';
+  if (!gameActive) return 'menu';
+  return infoOpen ? 'product-info' : 'playing';
+}
+
+function roundedVector(vector) {
+  return {
+    x: Math.round(vector.x * 100) / 100,
+    y: Math.round(vector.y * 100) / 100,
+    z: Math.round(vector.z * 100) / 100,
+  };
+}
+
+function editableCategoryState(ids, documentIds) {
+  const registered = ids.filter((id) => editableObjects.has(id));
+  const authored = ids.filter((id) => documentIds.has(id));
+  return {
+    expected: ids.length,
+    authored: authored.length,
+    registered: registered.length,
+    mapped: ids.filter((id) => documentIds.has(id) && editableObjects.has(id)).length,
+  };
+}
+
+function editableRuntimeState() {
+  const documentIds = new Set(runtimeSceneDocument?.objects.map((entry) => entry.id) ?? []);
+  const registeredIds = EXPECTED_EDITABLE_IDS.filter((id) => editableObjects.has(id));
+  const mappedIds = EXPECTED_EDITABLE_IDS.filter((id) => documentIds.has(id) && editableObjects.has(id));
+  const dynamicIds = [...dynamicEditableObjectIds].filter((id) => documentIds.has(id) && editableObjects.has(id)).sort();
+  return {
+    expectedCount: EXPECTED_EDITABLE_IDS.length,
+    documentCount: runtimeSceneDocument?.objects.length ?? 0,
+    registeredCount: registeredIds.length,
+    mappedCount: mappedIds.length,
+    registeredIds,
+    mappedIds,
+    missingFromDocument: EXPECTED_EDITABLE_IDS.filter((id) => !documentIds.has(id)),
+    missingRuntimeBindings: EXPECTED_EDITABLE_IDS.filter((id) => documentIds.has(id) && !editableObjects.has(id)),
+    dynamicCount: dynamicIds.length,
+    dynamicIds,
+    totalRegisteredCount: editableObjects.size,
+    categories: Object.fromEntries(
+      Object.entries(EDITABLE_ID_CATEGORIES).map(([name, ids]) => [name, editableCategoryState(ids, documentIds)]),
+    ),
+  };
+}
+
+window.render_game_to_text = () => JSON.stringify({
+  coordinateSystem: 'Three.js world units; +X right, +Y up, camera starts facing -Z',
+  mode: gameMode(),
+  sceneSource: runtimeSceneSource,
+  player: camera ? { ...roundedVector(camera.position), yaw: Math.round(yaw * 1000) / 1000, pitch: Math.round(pitch * 1000) / 1000 } : null,
+  score,
+  targetScore: WIN_SCORE,
+  weapon: currentWeapon >= 0 ? WEAPONS[currentWeapon].id : null,
+  collected: [...collected].map((index) => WEAPONS[index]?.id).filter(Boolean),
+  balloons: { alive: balloons.filter((balloon) => balloon.alive).length, total: balloons.length },
+  crowd: scene ? scene.children.filter((child) => child.userData.crowdMember).length : 0,
+  crowdPopulations: {
+    procedural: PROCEDURAL_CROWD_IDS.filter((id) => editableObjects.has(id)).length,
+    gltf: GLTF_CROWD_IDS.filter((id) => editableObjects.has(id)).length,
+    total: [...PROCEDURAL_CROWD_IDS, ...GLTF_CROWD_IDS].filter((id) => editableObjects.has(id)).length,
+  },
+  scan: { panelOpen: infoOpen, scanned: qrObjs.filter((qr) => qr.scanned).map((qr) => qr.w.id) },
+  lock: {
+    pointerLocked: isLocked,
+    pointerElementIsCanvas: document.pointerLockElement === document.getElementById('game-canvas'),
+    keyboardFallback: pointerLockFallback,
+  },
+  layout: runtimeSceneDocument ? runtimeSceneDocument.objects.map((entry) => ({
+    id: entry.id,
+    parentId: entry.parentId,
+    position: roundedVector(entry.position),
+    worldPosition: runtimeWorldTransforms.has(entry.id) ? roundedVector(runtimeWorldTransforms.get(entry.id).position) : null,
+  })) : [],
+  editable: editableRuntimeState(),
+  obstacles: runtimeColliders.map((collider) => collider.id),
+});
+
+window.advanceTime = (milliseconds) => {
+  if (!Number.isFinite(milliseconds) || milliseconds < 0) throw new TypeError('advanceTime expects a non-negative finite duration');
+  const boundedMilliseconds = Math.min(milliseconds, 1000);
+  if (!scene || !camera || !renderer || boundedMilliseconds === 0) return boundedMilliseconds;
+  const step = 1 / 60;
+  const steps = Math.min(60, Math.max(1, Math.ceil(boundedMilliseconds / (1000 / 60))));
+  for (let index = 0; index < steps; index++) {
+    simulationTime += step;
+    updateGame(step, simulationTime);
+  }
+  renderer.render(scene, camera);
+  return boundedMilliseconds;
+};
 </script>
 </body>
 </html>
