@@ -1,0 +1,184 @@
+name: Zebra scene sync
+
+on:
+  schedule:
+    - cron: "3-58/5 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: zebra-scene-sync
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    name: Validate and update the Zebra scene
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out trusted sync code
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: main
+          path: automation
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Claim a queued editor checkpoint
+        id: claim
+        env:
+          CLAIM_FILE: ${{ runner.temp }}/zebra-sync/claim.json
+          SYNC_SECRET: ${{ secrets.ZEBRA_SYNC_SECRET }}
+          SYNC_URL: https://zebra-scene-editor.timofeymarkin98.workers.dev
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          mkdir -p "$(dirname "$CLAIM_FILE")"
+          code="$(curl --silent --show-error --retry 2 --retry-all-errors --max-filesize 25165824 \
+            --output "$CLAIM_FILE" --write-out '%{http_code}' \
+            --request POST "$SYNC_URL/api/github-sync/claim" \
+            --header "Authorization: Bearer $SYNC_SECRET" \
+            --header 'Content-Type: application/json' \
+            --data "{\"runnerId\":\"${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}\"}")"
+          if [ "$code" = "204" ]; then
+            echo "pending=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if [ "$code" != "200" ]; then
+            echo "The Zebra editor claim endpoint returned HTTP $code." >&2
+            exit 1
+          fi
+          CLAIM_FILE="$CLAIM_FILE" node --input-type=module -e '
+            import fs from "node:fs";
+            const claim = JSON.parse(fs.readFileSync(process.env.CLAIM_FILE, "utf8"));
+            const uuid = /^[0-9a-f-]{36}$/i, sha = /^[0-9a-f]{40}$/i;
+            if (claim.pending !== true || !uuid.test(claim.requestId) || !uuid.test(claim.leaseId) || !sha.test(claim.expectedGitHead)) throw new Error("Invalid Zebra claim identity.");
+            if (claim.repository !== "Sparkah/zebra-circus-game" || claim.branch !== "agent/game-port-studio-integration" || claim.path !== "zebra-circus.scene.json") throw new Error("The Zebra claim escaped its fixed repository target.");
+            fs.appendFileSync(process.env.GITHUB_OUTPUT, `pending=true\nrequest_id=${claim.requestId}\nlease_id=${claim.leaseId}\nexpected_head=${claim.expectedGitHead}\n`);
+          '
+
+      - name: Check out the review branch without executing it
+        if: steps.claim.outputs.pending == 'true'
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          repository: Sparkah/zebra-circus-game
+          ref: agent/game-port-studio-integration
+          path: target
+          fetch-depth: 2
+          persist-credentials: true
+          sparse-checkout: zebra-circus.scene.json
+          sparse-checkout-cone-mode: false
+
+      - name: Validate the exact scene and expected Git parent
+        if: steps.claim.outputs.pending == 'true'
+        id: prepare
+        env:
+          CLAIM_FILE: ${{ runner.temp }}/zebra-sync/claim.json
+          EXPECTED_HEAD: ${{ steps.claim.outputs.expected_head }}
+          OUTPUT_SCENE: ${{ runner.temp }}/zebra-sync/validated.scene.json
+        shell: bash
+        run: |
+          set -euo pipefail
+          actual_head="$(git -C target rev-parse HEAD)"
+          baseline="$RUNNER_TEMP/zebra-sync/baseline.scene.json"
+          if [ "$actual_head" = "$EXPECTED_HEAD" ]; then
+            cp target/zebra-circus.scene.json "$baseline"
+            already_pushed=false
+          else
+            parent="$(git -C target rev-parse HEAD^)"
+            changed="$(git -C target diff-tree --no-commit-id --name-only -r HEAD)"
+            if [ "$parent" != "$EXPECTED_HEAD" ] || [ "$changed" != "zebra-circus.scene.json" ]; then
+              echo "The review branch moved outside the queued one-file Zebra update." >&2
+              exit 1
+            fi
+            git -C target show "$EXPECTED_HEAD:zebra-circus.scene.json" > "$baseline"
+            already_pushed=true
+          fi
+          node automation/.github/scripts/zebra-scene-sync-validator.mjs "$baseline" "$CLAIM_FILE" "$OUTPUT_SCENE"
+          if [ "$already_pushed" = true ]; then
+            cmp --silent "$OUTPUT_SCENE" target/zebra-circus.scene.json || {
+              echo "The existing child commit does not contain the queued Zebra scene." >&2
+              exit 1
+            }
+            commit_sha="$actual_head"
+          else
+            mv "$OUTPUT_SCENE" target/zebra-circus.scene.json
+            git -C target diff --quiet -- zebra-circus.scene.json && {
+              echo "The queued revision contains no GitHub scene change." >&2
+              exit 1
+            }
+            changed="$(git -C target diff --name-only)"
+            [ "$changed" = "zebra-circus.scene.json" ] || {
+              echo "The prepared update changed more than the Zebra scene file." >&2
+              exit 1
+            }
+            commit_sha=""
+          fi
+          echo "already_pushed=$already_pushed" >> "$GITHUB_OUTPUT"
+          echo "commit_sha=$commit_sha" >> "$GITHUB_OUTPUT"
+
+      - name: Commit and push the validated scene
+        if: steps.claim.outputs.pending == 'true' && steps.prepare.outputs.already_pushed != 'true'
+        id: publish
+        shell: bash
+        run: |
+          set -euo pipefail
+          git -C target config user.name "Zebra Scene Editor"
+          git -C target config user.email "zebra-scene-editor@users.noreply.github.com"
+          git -C target add -- zebra-circus.scene.json
+          [ "$(git -C target diff --cached --name-only)" = "zebra-circus.scene.json" ]
+          git -C target commit -m "Update Zebra scene from live editor"
+          commit_sha="$(git -C target rev-parse HEAD)"
+          [ "$(git -C target rev-parse HEAD^)" = "${{ steps.claim.outputs.expected_head }}" ]
+          if ! git -C target push origin HEAD:refs/heads/agent/game-port-studio-integration; then
+            remote_sha="$(git -C target ls-remote origin refs/heads/agent/game-port-studio-integration | cut -f1)"
+            [ "$remote_sha" = "$commit_sha" ] || exit 1
+          fi
+          echo "commit_sha=$commit_sha" >> "$GITHUB_OUTPUT"
+
+      - name: Verify the GitHub update with the editor
+        if: steps.claim.outputs.pending == 'true'
+        id: complete
+        env:
+          COMMIT_SHA: ${{ steps.publish.outputs.commit_sha || steps.prepare.outputs.commit_sha }}
+          COMPLETE_FILE: ${{ runner.temp }}/zebra-sync/complete.json
+          LEASE_ID: ${{ steps.claim.outputs.lease_id }}
+          REQUEST_ID: ${{ steps.claim.outputs.request_id }}
+          SYNC_SECRET: ${{ secrets.ZEBRA_SYNC_SECRET }}
+          SYNC_URL: https://zebra-scene-editor.timofeymarkin98.workers.dev
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --input-type=module -e '
+            import fs from "node:fs";
+            fs.writeFileSync(process.env.COMPLETE_FILE, JSON.stringify({ status: "complete", requestId: process.env.REQUEST_ID, leaseId: process.env.LEASE_ID, commitSha: process.env.COMMIT_SHA }));
+          '
+          curl --silent --show-error --fail-with-body --retry 2 --retry-all-errors \
+            --request POST "$SYNC_URL/api/github-sync/complete" \
+            --header "Authorization: Bearer $SYNC_SECRET" \
+            --header 'Content-Type: application/json' \
+            --data-binary "@$COMPLETE_FILE" > /dev/null
+
+      - name: Return a pre-push failure to the editor
+        if: failure() && steps.claim.outputs.pending == 'true' && steps.publish.outcome != 'success' && steps.prepare.outputs.already_pushed != 'true'
+        continue-on-error: true
+        env:
+          FAILURE_FILE: ${{ runner.temp }}/zebra-sync/failure.json
+          LEASE_ID: ${{ steps.claim.outputs.lease_id }}
+          REQUEST_ID: ${{ steps.claim.outputs.request_id }}
+          SYNC_SECRET: ${{ secrets.ZEBRA_SYNC_SECRET }}
+          SYNC_URL: https://zebra-scene-editor.timofeymarkin98.workers.dev
+        shell: bash
+        run: |
+          node --input-type=module -e '
+            import fs from "node:fs";
+            fs.writeFileSync(process.env.FAILURE_FILE, JSON.stringify({ status: "failed", requestId: process.env.REQUEST_ID, leaseId: process.env.LEASE_ID, message: `GitHub sync validation failed in run ${process.env.GITHUB_RUN_ID}.` }));
+          '
+          curl --silent --show-error --fail-with-body \
+            --request POST "$SYNC_URL/api/github-sync/complete" \
+            --header "Authorization: Bearer $SYNC_SECRET" \
+            --header 'Content-Type: application/json' \
+            --data-binary "@$FAILURE_FILE" > /dev/null
