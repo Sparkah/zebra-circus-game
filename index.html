@@ -1,0 +1,2196 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Zebra Circus Blaster</title>
+<link rel="manifest" href="manifest.webmanifest">
+<meta name="theme-color" content="#05050d">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Circus Blaster">
+<script>if('serviceWorker' in navigator){window.addEventListener('load',()=>navigator.serviceWorker.register('sw.js').catch(()=>{}));}</script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Barlow:ital,wght@0,400;0,600;0,700;0,800;1,400&family=Barlow+Condensed:wght@500;600;700;800&family=Source+Sans+3:wght@400;600;700&display=swap" rel="stylesheet">
+<style>
+:root {
+  --c-bg:      #05050d;
+  --c-panel:   rgba(5,5,15,0.93);
+  --c-border:  #ff6a00;
+  --c-border2: rgba(255,106,0,0.35);
+  --c-accent:  #ff6a00;
+  --c-yellow:  #ffd200;
+  --c-text:    #d8ddf0;
+  --c-muted:   #4a5070;
+  --c-dim:     rgba(255,255,255,0.08);
+}
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { background: #000; overflow: hidden; font-family: 'Source Sans 3', 'Barlow', Arial, sans-serif; }
+#game-canvas { display: block; width: 100vw; height: 100vh; }
+
+/* ── HUD ── */
+#hud { position: fixed; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; z-index: 10; display: none; }
+
+/* ── SCORE ── */
+#score-box {
+  position: absolute; top: 16px; right: 16px;
+  background: var(--c-panel); border: 1px solid var(--c-border);
+  border-top: 3px solid var(--c-border);
+  padding: 10px 20px; color: var(--c-text); text-align: center;
+  clip-path: polygon(0 0, calc(100% - 10px) 0, 100% 10px, 100% 100%, 0 100%);
+}
+#score-box .lbl { font-size: 10px; color: var(--c-accent); letter-spacing: 3px; font-weight: 600; text-transform: uppercase; }
+#score-value { font-size: 42px; font-weight: 700; line-height: 1; font-family: 'Space Mono', monospace; color: #fff; }
+#score-box .sub { font-size: 10px; color: var(--c-muted); margin-top: 2px; letter-spacing: 1px; }
+
+/* ── CROSSHAIR ── */
+#crosshair {
+  position: absolute; top: 50%; left: 50%;
+  transform: translate(-50%,-50%); width: 32px; height: 32px;
+}
+#crosshair::before {
+  content: ''; position: absolute;
+  top: 50%; left: 0; transform: translateY(-50%);
+  width: 11px; height: 1px; background: rgba(255,255,255,0.88);
+  box-shadow: 21px 0 0 rgba(255,255,255,0.88);
+}
+#crosshair::after {
+  content: ''; position: absolute;
+  left: 50%; top: 0; transform: translateX(-50%);
+  width: 1px; height: 11px; background: rgba(255,255,255,0.88);
+  box-shadow: 0 21px 0 rgba(255,255,255,0.88);
+}
+
+/* ── PROMPT ── */
+#prompt {
+  position: absolute; bottom: 108px; left: 50%; transform: translateX(-50%);
+  color: var(--c-yellow); font-size: 12px; font-weight: 600; letter-spacing: 2px;
+  background: rgba(5,5,15,0.9); padding: 6px 20px;
+  border: 1px solid var(--c-yellow); border-left: 3px solid var(--c-yellow);
+  display: none; white-space: nowrap; text-transform: uppercase;
+}
+
+/* ── PRODUCT POPUP ── */
+#info-panel {
+  position: absolute; top: 50%; right: 24px; transform: translateY(-50%);
+  width: 290px; background: rgba(5,5,15,0.97);
+  border: 1px solid #00a651; border-top: 3px solid #00a651;
+  display: none; pointer-events: all; z-index: 900;
+  clip-path: polygon(0 0, calc(100% - 14px) 0, 100% 14px, 100% 100%, 0 100%);
+  box-shadow: 0 0 40px rgba(0,166,81,0.25);
+}
+#info-panel-header {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 12px 14px 10px; border-bottom: 1px solid rgba(0,166,81,0.25);
+}
+#info-panel-header .prod-title {
+  font-family: 'Barlow Condensed', sans-serif; font-weight: 700;
+  font-size: 14px; color: #00a651; letter-spacing: 2px; text-transform: uppercase;
+}
+#info-panel .close-btn {
+  background: transparent; color: #666; border: 1px solid #333;
+  width: 22px; height: 22px; border-radius: 2px; cursor: pointer;
+  font-size: 13px; line-height: 1; display: flex; align-items: center; justify-content: center;
+  pointer-events: all; flex-shrink: 0;
+}
+#info-panel .close-btn:hover { color: #fff; border-color: #666; }
+#prod-body { padding: 12px 14px; }
+#prod-desc { font-family: 'Source Sans 3', sans-serif; font-size: 12px; color: #8090b0; line-height: 1.55; margin-bottom: 12px; }
+#prod-specs { list-style: none; padding: 0; margin: 0 0 12px; }
+#prod-specs li {
+  font-family: 'Source Sans 3', sans-serif; font-size: 11px; color: var(--c-text);
+  padding: 4px 0; border-bottom: 1px solid rgba(0,166,81,0.1);
+  display: flex; align-items: center; gap: 7px;
+}
+#prod-specs li::before { content: '//'; color: #00a651; font-size: 9px; flex-shrink: 0; font-family: monospace; }
+#prod-effect {
+  font-size: 11px; color: var(--c-yellow); background: rgba(255,210,0,0.07);
+  padding: 8px 10px; border-left: 2px solid var(--c-yellow); line-height: 1.5; margin-bottom: 12px;
+}
+#prod-visit-btn {
+  width: 100%; background: #00a651; color: #fff; border: none; padding: 9px;
+  font-family: 'Barlow Condensed', sans-serif; font-weight: 700; font-size: 12px;
+  letter-spacing: 2px; cursor: pointer; text-transform: uppercase;
+}
+#prod-visit-btn:hover { background: #00c060; }
+
+/* ── PROGRESS ── */
+#progress-wrap {
+  position: absolute; bottom: 14px; left: 50%; transform: translateX(-50%);
+  width: 300px; text-align: center;
+}
+#progress-lbl { color: var(--c-muted); font-size: 10px; margin-bottom: 5px; letter-spacing: 2px; text-transform: uppercase; font-weight: 600; }
+#progress-track {
+  background: rgba(255,255,255,0.05); height: 8px;
+  border: 1px solid rgba(255,106,0,0.3); overflow: hidden;
+}
+#progress-fill {
+  background: var(--c-accent); height: 100%; width: 0%;
+  transition: width 0.3s; box-shadow: 0 0 8px var(--c-accent);
+}
+
+/* ── WEAPON SLOTS ── */
+#weapon-slots {
+  position: absolute; bottom: 42px; left: 50%; transform: translateX(-50%);
+  display: flex; gap: 4px;
+}
+.wslot {
+  width: 56px; height: 56px; background: rgba(5,5,15,0.82);
+  border: 1px solid #1e1e30;
+  display: flex; flex-direction: column;
+  align-items: center; justify-content: center; color: var(--c-text);
+  font-size: 8px; text-align: center; line-height: 1.3;
+  transition: border-color 0.1s, background 0.1s;
+  position: relative; font-family: 'Rajdhani', sans-serif;
+  font-weight: 600; letter-spacing: 0.5px;
+}
+.wslot::before {
+  content: attr(data-num); position: absolute; top: 3px; left: 5px;
+  font-size: 8px; color: var(--c-muted); font-family: 'Space Mono', monospace;
+}
+.wslot .ico { font-size: 10px; margin-bottom: 2px; color: var(--c-muted); letter-spacing: 0; }
+.wslot.has-it { border-color: #2a2a44; }
+.wslot.active { border-color: var(--c-accent); border-top: 2px solid var(--c-accent); background: rgba(255,106,0,0.1); }
+.wslot.empty { opacity: 0.28; }
+
+/* ── HINT ── */
+#hint {
+  position: absolute; top: 16px; left: 16px;
+  color: var(--c-muted); font-size: 11px; line-height: 2;
+  background: rgba(5,5,15,0.72); padding: 8px 12px;
+  border-left: 2px solid var(--c-border2); letter-spacing: 0.5px; font-weight: 500;
+}
+
+/* ── WEAPON INFO ── */
+#weapon-info {
+  position: absolute; bottom: 108px; right: 16px;
+  background: rgba(5,5,15,0.85); border: 1px solid #1e1e30;
+  border-left: 2px solid var(--c-accent);
+  padding: 8px 14px; color: var(--c-text); font-size: 12px;
+  min-width: 160px; display: none;
+}
+#weapon-info .wname { color: var(--c-accent); font-weight: 700; font-size: 13px; letter-spacing: 1px; text-transform: uppercase; }
+#weapon-info .weffect { color: var(--c-muted); margin-top: 2px; font-size: 11px; }
+
+/* ── EFFECT FLASH ── */
+#effect-flash {
+  position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+  pointer-events: none; z-index: 5; opacity: 0; transition: opacity 0.08s ease-out;
+}
+
+/* ── KILL FEED ── */
+#kill-feed {
+  position: absolute; top: 72px; right: 16px;
+  display: flex; flex-direction: column; gap: 3px; align-items: flex-end;
+}
+.kill-msg {
+  background: rgba(5,5,15,0.88); color: var(--c-text); font-size: 11px;
+  padding: 4px 10px; border-left: 2px solid var(--c-accent);
+  font-family: 'Rajdhani', sans-serif; font-weight: 600; letter-spacing: 0.5px;
+  animation: fadeKill 2s ease forwards;
+}
+@keyframes fadeKill {
+  0%   { opacity: 1; transform: translateX(20px); }
+  70%  { opacity: 1; transform: translateX(0); }
+  100% { opacity: 0; }
+}
+
+/* ── SCREENS ── */
+.screen {
+  position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  z-index: 100; color: var(--c-text);
+}
+
+/* ── START SCREEN ── */
+#start-screen {
+  background: repeating-linear-gradient(
+    -55deg,
+    #000000 0px, #000000 38px,
+    #1a1a1a 38px, #1a1a1a 40px,
+    #ffffff 40px, #ffffff 78px,
+    #e8e8e8 78px, #e8e8e8 80px
+  );
+  position: relative; overflow: hidden;
+}
+#start-screen::before {
+  content: ''; position: absolute; inset: 0;
+  background: rgba(0,0,0,0.82);
+  pointer-events: none; z-index: 0;
+}
+#start-screen > * { position: relative; z-index: 1; }
+
+/* Corner brackets */
+.ss-corner {
+  position: absolute; width: 68px; height: 68px;
+  border-style: solid; border-color: var(--c-accent); border-width: 0;
+  pointer-events: none; z-index: 2;
+}
+.ss-tl { top: 30px; left: 30px; border-top-width: 3px; border-left-width: 3px; }
+.ss-tr { top: 30px; right: 30px; border-top-width: 3px; border-right-width: 3px; }
+.ss-bl { bottom: 30px; left: 30px; border-bottom-width: 3px; border-left-width: 3px; }
+.ss-br { bottom: 30px; right: 30px; border-bottom-width: 3px; border-right-width: 3px; }
+
+.ss-presenter {
+  font-family: 'Space Mono', monospace; font-size: 11px;
+  letter-spacing: 7px; color: var(--c-accent); opacity: 0.72;
+  text-transform: uppercase; margin-bottom: 26px;
+}
+
+.ss-title-block { text-align: center; margin-bottom: 28px; }
+
+.zebra-logo {
+  display: flex; justify-content: center; margin-bottom: 10px;
+}
+.zebra-logo svg { filter: drop-shadow(0 0 40px rgba(255,255,255,0.18)); }
+
+.ss-hline {
+  height: 2px; width: 540px; margin: 10px auto 16px;
+  background: linear-gradient(90deg, transparent 0%, var(--c-accent) 20%, var(--c-accent) 80%, transparent 100%);
+}
+
+.ss-game-title {
+  font-size: 38px; font-weight: 800; color: #fff;
+  letter-spacing: 14px; font-family: 'Barlow Condensed', sans-serif;
+  text-transform: uppercase;
+  text-shadow: 0 0 28px rgba(0,166,81,0.45);
+}
+
+.ss-qr-banner {
+  display: flex; align-items: center; gap: 12px;
+  font-family: 'Space Mono', monospace; font-size: 12px;
+  letter-spacing: 2px; color: #dde0ec; text-transform: uppercase;
+  border: 1px solid rgba(255,106,0,0.28); border-left: 3px solid var(--c-accent);
+  background: rgba(255,106,0,0.06); padding: 13px 28px;
+  margin-bottom: 44px;
+}
+.ss-qr-icon { color: var(--c-accent); font-size: 20px; line-height: 1; }
+
+.btn-lg { padding: 18px 80px; font-size: 18px; letter-spacing: 7px; }
+
+.controls-grid {
+  display: grid; grid-template-columns: 1fr 1fr; gap: 4px 24px;
+  background: rgba(255,255,255,0.02);
+  border: 1px solid rgba(255,106,0,0.18); border-left: 2px solid var(--c-accent);
+  padding: 12px 20px; margin: 14px 0 24px; font-size: 12px; color: #424868;
+  font-family: 'Rajdhani', sans-serif; font-weight: 600; letter-spacing: 0.5px;
+}
+.controls-grid .key { color: var(--c-accent); font-weight: 700; }
+
+.btn {
+  background: transparent; color: var(--c-accent);
+  border: 1px solid var(--c-accent); border-top: 2px solid var(--c-accent);
+  padding: 12px 48px; font-size: 14px; font-weight: 700; cursor: pointer;
+  letter-spacing: 4px; font-family: 'Rajdhani', sans-serif; text-transform: uppercase;
+  clip-path: polygon(0 0, calc(100% - 12px) 0, 100% 12px, 100% 100%, 12px 100%, 0 calc(100% - 12px));
+  transition: background 0.15s, color 0.15s, box-shadow 0.15s;
+}
+.btn:hover {
+  background: rgba(255,106,0,0.12); color: #fff;
+  box-shadow: 0 0 22px rgba(255,106,0,0.28), inset 0 0 16px rgba(255,106,0,0.06);
+}
+
+/* ── TUTORIAL OVERLAY ── */
+#tutorial-overlay {
+  position: fixed; inset: 0; z-index: 200;
+  background: rgba(0,0,0,0.88);
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 0;
+}
+#tutorial-overlay .tut-title {
+  font-family: 'Rajdhani', sans-serif; font-weight: 700;
+  font-size: 13px; color: var(--c-accent); letter-spacing: 4px;
+  text-transform: uppercase; margin-bottom: 28px;
+}
+#tutorial-overlay .tut-cards {
+  display: flex; gap: 20px; margin-bottom: 36px;
+}
+.tut-card {
+  width: 180px; padding: 22px 18px; text-align: center;
+  background: rgba(5,5,15,0.9);
+  border: 1px solid rgba(255,106,0,0.3); border-top: 3px solid var(--c-accent);
+  clip-path: polygon(0 0, calc(100% - 12px) 0, 100% 12px, 100% 100%, 0 100%);
+  display: flex; flex-direction: column; align-items: center; gap: 12px;
+}
+.tut-card .tut-icon {
+  font-size: 38px; line-height: 1;
+}
+.tut-card .tut-head {
+  font-family: 'Rajdhani', sans-serif; font-weight: 700;
+  font-size: 14px; color: #fff; letter-spacing: 1px; text-transform: uppercase;
+}
+.tut-card .tut-body {
+  font-size: 12px; color: var(--c-muted); line-height: 1.6; letter-spacing: 0.3px;
+}
+#tutorial-overlay .tut-controls {
+  display: grid; grid-template-columns: 1fr 1fr; gap: 6px 32px;
+  font-family: 'Rajdhani', sans-serif; font-size: 13px;
+  color: var(--c-muted); font-weight: 600; letter-spacing: 0.5px;
+  margin-bottom: 32px;
+  border-left: 2px solid rgba(255,106,0,0.4); padding-left: 14px;
+}
+#tutorial-overlay .tut-controls .k { color: var(--c-accent); font-weight: 700; }
+
+/* ── REWARD SCREEN ── */
+#reward-screen { background: #000; display: none; flex-direction: column; }
+#reward-top { border-bottom: 1px solid #222; }
+
+/* ── MILESTONE POPUP ── */
+#milestone-popup {
+  display: none; position: absolute; top: 50%; left: 50%; transform: translate(-50%,-50%);
+  background: rgba(5,5,15,0.97); border: 1px solid #00a651; border-top: 3px solid #00a651;
+  padding: 32px 40px; text-align: center; z-index: 950; pointer-events: all;
+  clip-path: polygon(0 0, calc(100% - 16px) 0, 100% 16px, 100% 100%, 0 100%);
+  box-shadow: 0 0 60px rgba(0,166,81,0.35); min-width: 380px;
+}
+#milestone-popup .mp-pts {
+  font-family: 'Barlow Condensed', sans-serif; font-size: 44px; font-weight: 800;
+  color: #00a651; letter-spacing: 4px; margin-bottom: 4px;
+}
+#milestone-popup .mp-sub {
+  font-family: 'Source Sans 3', sans-serif; font-size: 14px; color: #aaa; margin-bottom: 20px;
+}
+#milestone-popup .mp-btns { display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; }
+
+/* ── LOADING ── */
+#loading-screen { background: var(--c-bg); }
+#loading-screen p { color: var(--c-accent); font-size: 14px; letter-spacing: 5px; font-family: 'Rajdhani', sans-serif; font-weight: 600; text-transform: uppercase; }
+</style>
+</head>
+<body>
+
+<div id="loading-screen" class="screen">
+  <p>LOADING ZEBRA CIRCUS...</p>
+</div>
+
+<div id="start-screen" class="screen" style="display:none;">
+  <div class="ss-corner ss-tl"></div>
+  <div class="ss-corner ss-tr"></div>
+  <div class="ss-corner ss-bl"></div>
+  <div class="ss-corner ss-br"></div>
+  <div class="ss-title-block">
+    <div class="zebra-logo">
+      <svg width="127" height="42" viewBox="0 0 127 42" fill="none" xmlns="http://www.w3.org/2000/svg" aria-label="Zebra Technologies" style="width:320px;height:auto;">
+        <g clip-path="url(#clip0_ss)">
+          <path d="M57.0251 26.1776L54.8677 30.2604H41.436L50.1817 13.4882H42.4568L44.6142 9.38215H58.0227L49.3002 26.1776H57.0251Z" fill="white"/>
+          <path d="M64.8195 17.7564H71.7093V21.8624H64.8195V26.1773H71.7093V30.2601H59.7623V9.38186H71.7093V13.4879H64.8195V17.7564Z" fill="white"/>
+          <path d="M81.3367 9.38186C84.0044 9.38186 85.5355 9.66023 86.649 10.3794C88.0873 11.2609 88.9688 13.0472 88.9688 15.0422C88.9688 16.5037 88.5049 17.7332 87.5537 18.6611C86.9506 19.2874 86.4866 19.5658 85.3731 19.8906C86.649 20.169 87.229 20.4473 87.8785 21.0737C88.8064 21.9552 89.2936 23.1615 89.2936 24.6926C89.2936 26.6412 88.5049 28.3579 87.1594 29.2626C86.1155 29.9586 84.886 30.2369 82.7517 30.2369H74.2148V9.38186H81.3367ZM79.272 18.0347H80.5247C82.8445 18.0347 83.8189 17.3156 83.8189 15.5989C83.8189 13.9055 82.8445 13.1863 80.4783 13.1863H79.2952V18.0347H79.272ZM79.272 26.6412H81.1279C83.2621 26.6412 84.1668 25.9221 84.1668 24.2286C84.1668 23.2311 83.7957 22.512 83.0301 22.0944C82.4734 21.7928 81.963 21.7232 80.4319 21.7232H79.272V26.6412Z" fill="white"/>
+          <path d="M96.3223 30.2601H91.2419V9.38186H97.9926C100.753 9.38186 102.748 9.89221 104.117 10.9361C105.555 12.0728 106.367 13.9287 106.367 16.2253C106.367 19.4266 105.022 21.5145 102.331 22.5816L106.924 30.2369H100.846L96.2759 22.164V30.2601H96.3223ZM97.9462 19.3338C100.011 19.3338 101.264 18.2667 101.264 16.4573C101.264 14.7406 100.034 13.5575 98.271 13.5575H96.3223V19.357H97.9462V19.3338Z" fill="white"/>
+          <path d="M121.632 30.2601H127.13L120.286 9.38186H113.837L106.947 30.2601H112.283L113.582 26.1541H120.356L121.632 30.2601ZM114.881 22.048L116.969 15.367L119.057 22.048H114.881Z" fill="white"/>
+          <path fill-rule="evenodd" clip-rule="evenodd" d="M15.7839 12.4929H22.9238L20.0066 9.55982L19.9945 9.54768H16.2392C18.6931 9.31708 20.611 7.2457 20.611 4.72122C20.611 2.043 18.4513 -0.129517 15.7839 -0.129517V9.55982L7.75755 1.5292C7.33447 1.74767 6.92349 1.9904 6.52459 2.25337C6.08539 2.54061 5.66232 2.85213 5.25939 3.18387L12.8546 10.7816V27.4578L18.7172 33.3442V29.1812L15.7839 26.24V12.4929ZM24.5807 26.753H27.514V21.3642L24.5807 18.419V26.753ZM18.7007 26.7312L18.7168 12.5107L21.6461 15.4681L21.6461 15.4721H25.8443L28.7776 18.4174H24.575L21.6461 15.4725L21.634 26.7312H18.7007ZM9.91967 24.5154V24.6893C9.58927 24.3495 -0.129395 14.4255 -0.129395 14.4255C-0.117307 13.1592 0.0559531 11.9294 0.370238 10.7602L6.98634 17.4072V13.2442L1.53068 7.76638C1.99807 6.87229 2.55412 6.03484 3.18269 5.26212L9.91967 12.0224V24.5154ZM-0.0786254 18.6366V22.7996L18.718 41.6685V37.5096L-0.0786254 18.6366ZM30.4453 23.0298H33.3786L37.1742 26.7518C37.1742 29.43 35.0105 31.6025 32.3431 31.6025C29.6757 31.6025 27.516 29.43 27.516 26.7518H30.4453V23.0298Z" fill="white"/>
+        </g>
+        <defs>
+          <clipPath id="clip0_ss"><rect width="127" height="42" fill="white"/></clipPath>
+        </defs>
+      </svg>
+    </div>
+    <div class="ss-hline" style="background:linear-gradient(90deg,transparent 0%,#00a651 20%,#00a651 80%,transparent 100%);"></div>
+    <div class="ss-game-title">CIRCUS BLASTER</div>
+  </div>
+  <div class="ss-qr-banner">
+    SCAN THE QR CODES &nbsp;·&nbsp; LEARN MORE ABOUT THE PRODUCTS
+  </div>
+  <button class="btn btn-lg" id="play-btn">PLAY NOW</button>
+</div>
+
+<div id="tutorial-overlay" style="display:none;">
+  <div class="tut-title">// HOW TO PLAY //</div>
+  <div class="tut-cards">
+    <div class="tut-card">
+      <div class="tut-head">Reach 200 Points</div>
+      <div class="tut-body">Hit <strong style="color:var(--c-accent)">200 points</strong> to unlock the full Zebra Technologies product catalogue!</div>
+    </div>
+    <div class="tut-card">
+      <div class="tut-head">Scan QR Codes</div>
+      <div class="tut-body">Find the QR boards next to each device. Shoot them to scan and <strong style="color:#fff">learn more about Zebra products!</strong></div>
+    </div>
+    <div class="tut-card">
+      <div class="tut-head">Blast Balloons</div>
+      <div class="tut-body">Pick up Zebra hand terminals with <strong style="color:var(--c-accent)">E</strong> and use each device's special ability to pop balloons and score points.</div>
+    </div>
+    <div class="tut-card">
+      <div class="tut-head">4 Zebra Devices</div>
+      <div class="tut-body">MC9400 · MC3400 · PS30 · TC8300 — each with a unique scanning super-power. Collect them all!</div>
+    </div>
+  </div>
+  <div class="tut-controls">
+    <span><span class="k">W A S D</span> &nbsp;Move</span>
+    <span><span class="k">MOUSE</span> &nbsp;Look</span>
+    <span><span class="k">E</span> &nbsp;Pick up device</span>
+    <span><span class="k">CLICK</span> &nbsp;Shoot / Scan</span>
+    <span><span class="k">1 – 4</span> &nbsp;Switch device</span>
+    <span><span class="k">QR board</span> &nbsp;Shoot to learn</span>
+  </div>
+  <button class="btn" id="tut-go-btn">LET'S GO</button>
+</div>
+
+<div id="reward-screen" class="screen" style="background:#000;padding:0;justify-content:flex-start;align-items:stretch;">
+  <div id="reward-top" style="display:flex;flex-direction:column;align-items:center;padding:32px 24px 24px;flex-shrink:0;">
+    <svg width="127" height="42" viewBox="0 0 127 42" fill="none" xmlns="http://www.w3.org/2000/svg" aria-label="Zebra Technologies" style="width:220px;height:auto;margin-bottom:18px;">
+      <g clip-path="url(#clip0_rw)">
+        <path d="M57.0251 26.1776L54.8677 30.2604H41.436L50.1817 13.4882H42.4568L44.6142 9.38215H58.0227L49.3002 26.1776H57.0251Z" fill="white"/>
+        <path d="M64.8195 17.7564H71.7093V21.8624H64.8195V26.1773H71.7093V30.2601H59.7623V9.38186H71.7093V13.4879H64.8195V17.7564Z" fill="white"/>
+        <path d="M81.3367 9.38186C84.0044 9.38186 85.5355 9.66023 86.649 10.3794C88.0873 11.2609 88.9688 13.0472 88.9688 15.0422C88.9688 16.5037 88.5049 17.7332 87.5537 18.6611C86.9506 19.2874 86.4866 19.5658 85.3731 19.8906C86.649 20.169 87.229 20.4473 87.8785 21.0737C88.8064 21.9552 89.2936 23.1615 89.2936 24.6926C89.2936 26.6412 88.5049 28.3579 87.1594 29.2626C86.1155 29.9586 84.886 30.2369 82.7517 30.2369H74.2148V9.38186H81.3367ZM79.272 18.0347H80.5247C82.8445 18.0347 83.8189 17.3156 83.8189 15.5989C83.8189 13.9055 82.8445 13.1863 80.4783 13.1863H79.2952V18.0347H79.272ZM79.272 26.6412H81.1279C83.2621 26.6412 84.1668 25.9221 84.1668 24.2286C84.1668 23.2311 83.7957 22.512 83.0301 22.0944C82.4734 21.7928 81.963 21.7232 80.4319 21.7232H79.272V26.6412Z" fill="white"/>
+        <path d="M96.3223 30.2601H91.2419V9.38186H97.9926C100.753 9.38186 102.748 9.89221 104.117 10.9361C105.555 12.0728 106.367 13.9287 106.367 16.2253C106.367 19.4266 105.022 21.5145 102.331 22.5816L106.924 30.2369H100.846L96.2759 22.164V30.2601H96.3223ZM97.9462 19.3338C100.011 19.3338 101.264 18.2667 101.264 16.4573C101.264 14.7406 100.034 13.5575 98.271 13.5575H96.3223V19.357H97.9462V19.3338Z" fill="white"/>
+        <path d="M121.632 30.2601H127.13L120.286 9.38186H113.837L106.947 30.2601H112.283L113.582 26.1541H120.356L121.632 30.2601ZM114.881 22.048L116.969 15.367L119.057 22.048H114.881Z" fill="white"/>
+        <path fill-rule="evenodd" clip-rule="evenodd" d="M15.7839 12.4929H22.9238L20.0066 9.55982L19.9945 9.54768H16.2392C18.6931 9.31708 20.611 7.2457 20.611 4.72122C20.611 2.043 18.4513 -0.129517 15.7839 -0.129517V9.55982L7.75755 1.5292C7.33447 1.74767 6.92349 1.9904 6.52459 2.25337C6.08539 2.54061 5.66232 2.85213 5.25939 3.18387L12.8546 10.7816V27.4578L18.7172 33.3442V29.1812L15.7839 26.24V12.4929ZM24.5807 26.753H27.514V21.3642L24.5807 18.419V26.753ZM18.7007 26.7312L18.7168 12.5107L21.6461 15.4681L21.6461 15.4721H25.8443L28.7776 18.4174H24.575L21.6461 15.4725L21.634 26.7312H18.7007ZM9.91967 24.5154V24.6893C9.58927 24.3495 -0.129395 14.4255 -0.129395 14.4255C-0.117307 13.1592 0.0559531 11.9294 0.370238 10.7602L6.98634 17.4072V13.2442L1.53068 7.76638C1.99807 6.87229 2.55412 6.03484 3.18269 5.26212L9.91967 12.0224V24.5154ZM-0.0786254 18.6366V22.7996L18.718 41.6685V37.5096L-0.0786254 18.6366ZM30.4453 23.0298H33.3786L37.1742 26.7518C37.1742 29.43 35.0105 31.6025 32.3431 31.6025C29.6757 31.6025 27.516 29.43 27.516 26.7518H30.4453V23.0298Z" fill="white"/>
+      </g>
+      <defs>
+        <clipPath id="clip0_rw"><rect width="127" height="42" fill="white"/></clipPath>
+      </defs>
+    </svg>
+    <div style="font-family:'Barlow Condensed',sans-serif;font-size:34px;font-weight:800;color:#fff;letter-spacing:6px;text-transform:uppercase;margin-bottom:4px;">You Reached 200 Points!</div>
+    <div style="font-family:'Source Sans 3',sans-serif;font-size:15px;color:#aaa;margin-bottom:6px;">Score: <strong style="color:#fff;" id="final-score-val">0</strong> &nbsp;·&nbsp; Explore the full Zebra product lineup below</div>
+    <div style="display:flex;gap:12px;margin-top:10px;">
+      <button class="btn" id="open-zebra-btn" style="background:#00a651;border-color:#00a651;font-family:'Barlow Condensed',sans-serif;font-size:15px;letter-spacing:4px;padding:12px 36px;">EXPLORE PRODUCTS ↗</button>
+      <button class="btn" id="restart-btn" style="font-family:'Barlow Condensed',sans-serif;font-size:15px;letter-spacing:4px;padding:12px 36px;">PLAY AGAIN</button>
+    </div>
+  </div>
+  <div style="flex:1;border-top:2px solid #00a651;overflow:hidden;position:relative;">
+    <iframe id="zebra-products-frame" src="https://www.zebra.com/us/en/products.html"
+      style="width:100%;height:100%;border:none;background:#fff;"
+      sandbox="allow-scripts allow-same-origin allow-forms allow-popups"
+      title="Zebra Technologies Products"></iframe>
+    <div id="iframe-fallback" style="display:none;position:absolute;inset:0;background:#111;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:16px;">
+      <div style="font-family:'Barlow Condensed',sans-serif;font-size:22px;color:#fff;letter-spacing:2px;">Visit Zebra Technologies</div>
+      <a href="https://www.zebra.com/us/en/products.html" target="_blank" style="color:#00a651;font-family:'Source Sans 3',sans-serif;font-size:15px;">www.zebra.com/products</a>
+    </div>
+  </div>
+</div>
+
+<div id="milestone-popup">
+  <div class="mp-pts">200 POINTS!</div>
+  <div class="mp-sub">Keep scanning — or explore the full Zebra lineup</div>
+  <div class="mp-btns">
+    <button class="btn" id="mp-explore-btn" style="background:#00a651;border-color:#00a651;font-family:'Barlow Condensed',sans-serif;font-size:13px;letter-spacing:3px;padding:11px 28px;">EXPLORE ZEBRA.COM ↗</button>
+    <button class="btn" id="mp-continue-btn" style="font-family:'Barlow Condensed',sans-serif;font-size:13px;letter-spacing:3px;padding:11px 28px;">KEEP PLAYING</button>
+  </div>
+</div>
+
+<canvas id="game-canvas"></canvas>
+
+<div id="hud">
+  <div id="hint"></div>
+
+  <div id="score-box">
+    <div class="lbl">SCORE</div>
+    <div id="score-value">0</div>
+  </div>
+
+  <div id="kill-feed"></div>
+  <div id="crosshair"></div>
+  <div id="prompt"></div>
+
+  <div id="info-panel">
+    <div id="info-panel-header">
+      <div class="prod-title" id="ip-title">Product</div>
+      <button class="close-btn" id="ip-close">✕</button>
+    </div>
+    <div id="prod-body">
+      <div id="prod-desc"></div>
+      <ul id="prod-specs"></ul>
+      <div id="prod-effect"></div>
+      <button id="prod-visit-btn">VIEW ON ZEBRA.COM ↗</button>
+    </div>
+  </div>
+
+  <div id="weapon-info">
+    <div class="wname" id="wi-name"></div>
+    <div class="weffect" id="wi-effect"></div>
+  </div>
+
+  <div id="weapon-slots">
+    <div class="wslot empty" id="slot-0" data-num="1"><div class="ico">MC9400</div></div>
+    <div class="wslot empty" id="slot-1" data-num="2"><div class="ico">MC3400</div></div>
+    <div class="wslot empty" id="slot-2" data-num="3"><div class="ico">PS30</div></div>
+    <div class="wslot empty" id="slot-3" data-num="4"><div class="ico">TC8300</div></div>
+  </div>
+
+  <div id="progress-wrap">
+    <div id="progress-lbl">REACH 200 PTS — EXPLORE ZEBRA PRODUCTS</div>
+    <div id="progress-track"><div id="progress-fill"></div></div>
+  </div>
+
+  <div id="effect-flash"></div>
+</div>
+
+<script src="vendor/three.min.js"></script>
+<script src="vendor/GLTFLoader.js"></script>
+<script>
+'use strict';
+
+// Surface fatal errors on screen instead of hanging on a blank/stuck screen.
+window.addEventListener('error', e => {
+  let d = document.getElementById('__fatal');
+  if (!d) {
+    d = document.createElement('div');
+    d.id = '__fatal';
+    d.style.cssText = 'position:fixed;left:0;right:0;bottom:0;z-index:99999;max-height:28%;overflow:auto;'
+      + 'background:rgba(10,0,0,0.82);color:#ff6a00;font:12px/1.4 monospace;padding:8px 14px;'
+      + 'white-space:pre-wrap;pointer-events:none;border-top:2px solid #ff6a00;';
+    document.body.appendChild(d);
+  }
+  d.textContent += 'ERROR: ' + (e.message || e.error) + '\n  ' + (e.filename||'') + ':' + (e.lineno||'') + '\n\n';
+});
+if (typeof THREE === 'undefined') {
+  window.addEventListener('DOMContentLoaded', () => {
+    document.body.innerHTML = '<div style="position:fixed;inset:0;display:flex;align-items:center;'
+      + 'justify-content:center;background:#05050d;color:#ff6a00;font:16px monospace;text-align:center;padding:40px;">'
+      + 'Failed to load 3D engine (vendor/three.min.js).<br>Check that the vendor/ folder is present.</div>';
+  });
+}
+
+const loadedModels   = {};
+const deviceTextures = {}; // optional per-device base-color texture maps
+const photoTextures  = {}; // real product photo textures for procedural meshes
+
+// ═══════════════════════════════════════════════
+//  WEAPON DATA  (DS2278 + DS3678 removed)
+// ═══════════════════════════════════════════════
+const WEAPONS = [
+  {
+    id: 'MC9400', name: 'MC9400', fullName: 'Zebra MC9400 Mobile Computer',
+    color: 0x1a1a2e, accent: 0xff4422, icon: '',
+    url: 'https://www.zebra.com/us/en/products/mobile-computers/handheld/mc9400-series/mc9400.html',
+    desc: 'Ultra-rugged enterprise mobile computer built for the harshest industrial environments.',
+    specs: ['Android 11 OS','5G & WiFi 6E','IP65/IP67 + MIL-STD-810H','6" WVGA Touch Display','SE58 Scan Engine – SE4850 option','8000mAh Hot-Swap Battery'],
+    effectName: 'LASER BURST', effectDesc: 'Fires a continuous laser that pierces through multiple balloons at once!',
+    effect: 'laser', fireRate: 900, projColor: 0xff4422, projSpeed: 0, pts: 10, spread: 0, count: 1, areaR: 0.3, shape: 'brick'
+  },
+  {
+    id: 'MC3400', name: 'MC3400', fullName: 'Zebra MC3400 Mobile Computer',
+    color: 0x2d3748, accent: 0x29b6f6, icon: '',
+    url: 'https://www.zebra.com/us/en/products/mobile-computers/handheld/mc3400-series/mc3400.html',
+    desc: 'Compact, ergonomic mobile computer for frontline workers needing speed and flexibility.',
+    specs: ['Android 13 OS','WiFi 6 (802.11ax)','IP54 Rated','4" HD Touch Display','SE4710 Scan Engine','3000mAh Removable Battery'],
+    effectName: 'RAPID SCAN', effectDesc: 'Fires rapid pulses of scan energy — fastest fire rate of all terminals!',
+    effect: 'rapid', fireRate: 120, projColor: 0x29b6f6, projSpeed: 1.1, pts: 5, spread: 0.025, count: 1, areaR: 0.1, shape: 'slim'
+  },
+  {
+    id: 'PS30', name: 'PS30', fullName: 'Zebra PS30 Wearable Scanner',
+    color: 0x0d2137, accent: 0x00e676, icon: '',
+    url: 'https://www.zebra.com/us/en/products/mobile-computers/handheld/personal-shopper-series/ps30.html',
+    desc: 'Hands-free ring scanner worn on the finger for maximum productivity in warehouse picking.',
+    specs: ['Bluetooth 5.0 Ring Form Factor','IP42 Rated','1D & 2D Barcode Support','8-Hour Battery','Trigger on Index Finger','Works with MC9400/TC5X/TC7X'],
+    effectName: 'RING SHOCKWAVE', effectDesc: 'Emits a circular shockwave that destroys ALL balloons in a wide radius!',
+    effect: 'ring', fireRate: 1400, projColor: 0x00e676, projSpeed: 0, pts: 15, spread: 0, count: 1, areaR: 7, shape: 'ring'
+  },
+  {
+    id: 'TC8300', name: 'TC8300', fullName: 'Zebra TC8300 Touch Computer',
+    color: 0x0a0a12, accent: 0x00bcd4, icon: '',
+    url: 'https://www.zebra.com/us/en/products/mobile-computers/handheld/tc8300.html',
+    desc: 'Freezer/cooler-ready mobile computer operating from –30°C to 50°C for cold storage.',
+    specs: ['Android 10 OS','–30°C to +50°C Operation','IP65 & IP67 Rated','4.3" WVGA Display','Heated Screen Technology','Glove-Friendly Touch'],
+    effectName: 'CRYO EXPLOSION', effectDesc: 'Launches a cryo-grenade that freezes and shatters all balloons in a large area!',
+    effect: 'cryo', fireRate: 1100, projColor: 0x00bcd4, projSpeed: 0.7, pts: 20, spread: 0.04, count: 1, areaR: 4.5, shape: 'tablet'
+  }
+];
+
+// ═══════════════════════════════════════════════
+//  GAME STATE
+// ═══════════════════════════════════════════════
+let scene, camera, renderer;
+let score = 0;
+let gameActive = false, milestoneShown = false;
+let currentWeapon = -1;
+let collected = new Set();
+let lastShot = 0;
+let mouseDown = false;
+let isLocked = false;
+let infoOpen = false;
+let yaw = 0, pitch = 0;
+let weaponFlipStart = 0;
+const keys = {};
+const PLAYER_H = 1.7;
+const WIN_SCORE = 200;
+
+let balloons = [], weaponObjs = [], qrObjs = [], particles = [], projectiles = [], ringWaves = [], scanMarkers = [];
+let heldMesh = null;
+let promptTimer = null;
+let clock;
+
+// ═══════════════════════════════════════════════
+//  INIT
+// ═══════════════════════════════════════════════
+window.addEventListener('load', () => {
+  loadDeviceModels().then(() => {
+    document.getElementById('loading-screen').style.display = 'none';
+    document.getElementById('start-screen').style.display = 'flex';
+  });
+});
+
+function loadDeviceModels() {
+  const gltfLoader    = new THREE.GLTFLoader();
+  const textureLoader = new THREE.TextureLoader();
+  const loadEl        = document.querySelector('#loading-screen p');
+
+  // Load per-device base-color PNGs
+  const texPromises = WEAPONS.map(w =>
+    new Promise(resolve => {
+      textureLoader.load(
+        `textures/${w.id}/BaseColor.png`,
+        tex => { tex.encoding = THREE.sRGBEncoding; deviceTextures[w.id] = tex; resolve(); },
+        undefined,
+        () => resolve()
+      );
+    })
+  );
+
+  // Load real product photos for procedural mesh front faces
+  const photoPromises = WEAPONS.map(w =>
+    new Promise(resolve => {
+      textureLoader.load(
+        `textures/${w.id}_photo.png`,
+        tex => { tex.encoding = THREE.sRGBEncoding; photoTextures[w.id] = tex; resolve(); },
+        undefined,
+        () => resolve()
+      );
+    })
+  );
+
+  const meshIds = ['MC9400', 'MC3400', 'PS30', 'TC8300', 'Tent'];
+
+  const promises = meshIds.map(id =>
+    new Promise(resolve => {
+      if (loadEl) loadEl.textContent = `LOADING ${id}...`;
+      gltfLoader.load(
+        `models/${id}.glb`,
+        gltf => {
+          const root = gltf.scene;
+          if (id !== 'Tent') {
+            const box    = new THREE.Box3().setFromObject(root);
+            const size   = box.getSize(new THREE.Vector3());
+            const maxDim = Math.max(size.x, size.y, size.z);
+            if (maxDim > 0) root.scale.setScalar(0.65 / maxDim);
+            const box2   = new THREE.Box3().setFromObject(root);
+            const center = box2.getCenter(new THREE.Vector3());
+            root.position.sub(center);
+          }
+          loadedModels[id] = root;
+          resolve();
+        },
+        undefined,
+        () => { console.warn(`models/${id}.glb not found`); resolve(); }
+      );
+    })
+  );
+
+  return Promise.all([...promises, ...texPromises, ...photoPromises]).then(() => {
+    if (loadEl) loadEl.textContent = 'LOADING ZEBRA CIRCUS...';
+  });
+}
+
+document.getElementById('play-btn').addEventListener('click', startGame);
+document.getElementById('restart-btn').addEventListener('click', restartGame);
+document.getElementById('tut-go-btn').addEventListener('click', dismissTutorial);
+document.getElementById('ip-close').addEventListener('click', closeInfo);
+document.getElementById('open-zebra-btn').addEventListener('click', () => window.open('https://www.zebra.com/us/en/products.html','_blank'));
+document.getElementById('mp-explore-btn').addEventListener('click', () => window.open('https://www.zebra.com/us/en/products.html','_blank'));
+document.getElementById('mp-continue-btn').addEventListener('click', () => {
+  document.getElementById('milestone-popup').style.display = 'none';
+  document.getElementById('game-canvas').requestPointerLock();
+});
+
+function startGame() {
+  document.getElementById('start-screen').style.display = 'none';
+  document.getElementById('tutorial-overlay').style.display = 'flex';
+  initRenderer();
+  buildScene();
+  spawnWeapons();
+  spawnBalloons(28);
+  placeQRCodes();
+  bindControls();
+  clock = new THREE.Clock();
+  animate();
+}
+
+function dismissTutorial() {
+  document.getElementById('tutorial-overlay').style.display = 'none';
+  document.getElementById('hud').style.display = 'block';
+  gameActive = true;
+}
+
+function restartGame() {
+  const frame = document.getElementById('zebra-products-frame');
+  if (frame) frame.src = '';
+  document.getElementById('reward-screen').style.display = 'none';
+  score = 0; currentWeapon = -1; collected.clear();
+  balloons = []; weaponObjs = []; qrObjs = []; particles = []; projectiles = []; ringWaves = []; scanMarkers = [];
+  heldMesh = null; mouseDown = false; infoOpen = false; milestoneShown = false;
+  document.getElementById('milestone-popup').style.display = 'none';
+  document.getElementById('score-value').textContent = '0';
+  document.getElementById('progress-fill').style.width = '0%';
+  document.getElementById('weapon-info').style.display = 'none';
+  for (let i = 0; i < 4; i++) {
+    const s = document.getElementById('slot-' + i);
+    s.className = 'wslot empty';
+  }
+  while (scene.children.length) scene.remove(scene.children[0]);
+  camera.position.set(0, PLAYER_H, 2);
+  yaw = 0; pitch = 0;
+  buildScene();
+  spawnWeapons();
+  spawnBalloons(28);
+  placeQRCodes();
+  gameActive = true;
+}
+
+// ═══════════════════════════════════════════════
+//  RENDERER
+// ═══════════════════════════════════════════════
+function initRenderer() {
+  const canvas = document.getElementById('game-canvas');
+  renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+  renderer.setSize(window.innerWidth, window.innerHeight);
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+  renderer.shadowMap.enabled = true;
+  renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+  renderer.outputEncoding = THREE.sRGBEncoding;
+  renderer.toneMapping = THREE.ACESFilmicToneMapping;
+  renderer.toneMappingExposure = 0.72;
+
+  scene = new THREE.Scene();
+  scene.background = new THREE.Color(0x111111);
+  scene.fog = new THREE.FogExp2(0x0d0600, 0.022);
+
+  // Image-based lighting — procedural circus-tent environment for PBR reflections
+  buildEnvironment();
+
+  camera = new THREE.PerspectiveCamera(72, window.innerWidth / window.innerHeight, 0.05, 150);
+  camera.position.set(0, PLAYER_H, 2);
+  scene.add(camera);
+
+
+  window.addEventListener('resize', () => {
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    camera.aspect = window.innerWidth / window.innerHeight;
+    camera.updateProjectionMatrix();
+  });
+}
+
+// Procedural equirectangular environment → PMREM → scene.environment.
+// Gives every PBR (Standard/Physical) material soft reflections & ambient
+// occlusion-like fill without any real cubemap asset.
+function buildEnvironment() {
+  const c = document.createElement('canvas');
+  c.width = 512; c.height = 256;
+  const ctx = c.getContext('2d');
+
+  // Vertical gradient: warm glowing tent apex → amber horizon → dark sawdust floor
+  const grad = ctx.createLinearGradient(0, 0, 0, 256);
+  grad.addColorStop(0.00, '#4a3410'); // canopy peak (warm)
+  grad.addColorStop(0.35, '#6b4a18');
+  grad.addColorStop(0.55, '#3a2a12'); // horizon
+  grad.addColorStop(0.75, '#161008');
+  grad.addColorStop(1.00, '#0a0704'); // floor (dark)
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, 512, 256);
+
+  // A ring of warm "spotlight" hotspots near the top to give speculars something to catch
+  for (let i = 0; i < 8; i++) {
+    const x = (i / 8) * 512 + 32;
+    const g2 = ctx.createRadialGradient(x, 60, 2, x, 60, 46);
+    g2.addColorStop(0, 'rgba(255,240,200,0.9)');
+    g2.addColorStop(1, 'rgba(255,240,200,0)');
+    ctx.fillStyle = g2;
+    ctx.fillRect(x - 46, 14, 92, 92);
+  }
+
+  const equirect = new THREE.CanvasTexture(c);
+  equirect.mapping = THREE.EquirectangularReflectionMapping;
+  equirect.encoding = THREE.sRGBEncoding;
+
+  const pmrem = new THREE.PMREMGenerator(renderer);
+  pmrem.compileEquirectangularShader();
+  scene.environment = pmrem.fromEquirectangular(equirect).texture;
+  equirect.dispose();
+  pmrem.dispose();
+}
+
+// ═══════════════════════════════════════════════
+//  SCENE
+// ═══════════════════════════════════════════════
+function buildScene() {
+  // Ambient — warm lantern glow
+  scene.add(new THREE.AmbientLight(0x2a1800, 0.5));
+
+  // Main top spotlight — warm key light
+  const topSpot = new THREE.SpotLight(0xfff0cc, 4.0, 65, Math.PI * 0.28, 0.35, 1);
+  topSpot.position.set(0, 22, 0);
+  topSpot.castShadow = true;
+  topSpot.shadow.mapSize.set(1024, 1024);
+  scene.add(topSpot); scene.add(topSpot.target);
+
+  // Rim lights around the ring — warm amber + cool fill
+  [[0xffaa44,8,12,0],[0xffaa44,-8,12,0],[0xffd080,0,12,8],[0x7799ff,0,12,-8]].forEach(([c,x,y,z]) => {
+    const s = new THREE.SpotLight(c, 1.8, 45, Math.PI/4.5, 0.7);
+    s.position.set(x, y, z); scene.add(s); scene.add(s.target);
+  });
+
+  // Sawdust floor texture
+  const floorC = document.createElement('canvas'); floorC.width = 512; floorC.height = 512;
+  const fc = floorC.getContext('2d');
+  fc.fillStyle = '#9a7220'; fc.fillRect(0,0,512,512);
+  for (let i = 0; i < 14000; i++) {
+    const x = Math.random()*512, y = Math.random()*512;
+    const v = (Math.random()*70-35)|0;
+    fc.strokeStyle = `rgb(${Math.min(255,154+v)},${Math.min(255,114+v)},${Math.max(0,30+v)})`;
+    fc.lineWidth = Math.random()*1.4+0.2;
+    const a = Math.random()*Math.PI, l = Math.random()*9+2;
+    fc.beginPath(); fc.moveTo(x,y); fc.lineTo(x+Math.cos(a)*l, y+Math.sin(a)*l); fc.stroke();
+  }
+  const floorTex = new THREE.CanvasTexture(floorC);
+  floorTex.wrapS = floorTex.wrapT = THREE.RepeatWrapping; floorTex.repeat.set(5,5);
+  const floor = new THREE.Mesh(new THREE.CircleGeometry(26,80), new THREE.MeshStandardMaterial({map:floorTex, roughness:0.95, metalness:0.0, envMapIntensity:0.35}));
+  floor.rotation.x = -Math.PI/2; floor.receiveShadow = true; scene.add(floor);
+
+  // Packed dirt border ring (red clay)
+  const dirtC = document.createElement('canvas'); dirtC.width = 256; dirtC.height = 256;
+  const dc = dirtC.getContext('2d');
+  dc.fillStyle = '#7a2800'; dc.fillRect(0,0,256,256);
+  for (let i = 0; i < 5000; i++) {
+    const x=Math.random()*256, y=Math.random()*256, v=(Math.random()*50-25)|0;
+    dc.fillStyle=`rgb(${Math.min(255,122+v)},${Math.max(0,40+v)},${Math.max(0,v)})`;
+    dc.beginPath(); dc.ellipse(x,y,Math.random()*3+0.5,Math.random()*1.2+0.3,Math.random()*Math.PI,0,Math.PI*2); dc.fill();
+  }
+  const dirtTex = new THREE.CanvasTexture(dirtC);
+  dirtTex.wrapS = dirtTex.wrapT = THREE.RepeatWrapping; dirtTex.repeat.set(4,4);
+  const ring = new THREE.Mesh(new THREE.RingGeometry(9,13,80), new THREE.MeshStandardMaterial({map:dirtTex,side:THREE.DoubleSide, roughness:0.98, metalness:0.0, envMapIntensity:0.3}));
+  ring.rotation.x = -Math.PI/2; ring.position.y = 0.01; scene.add(ring);
+
+  // Inner performance ring — brighter sawdust
+  const inC = document.createElement('canvas'); inC.width = 512; inC.height = 512;
+  const ic = inC.getContext('2d');
+  ic.fillStyle = '#c8a030'; ic.fillRect(0,0,512,512);
+  for (let i = 0; i < 10000; i++) {
+    const x=Math.random()*512, y=Math.random()*512, v=(Math.random()*60-30)|0;
+    ic.strokeStyle=`rgb(${Math.min(255,200+v)},${Math.min(255,160+v)},${Math.max(0,48+v)})`;
+    ic.lineWidth=Math.random()*1.6+0.2;
+    const a=Math.random()*Math.PI, l=Math.random()*8+2;
+    ic.beginPath(); ic.moveTo(x,y); ic.lineTo(x+Math.cos(a)*l,y+Math.sin(a)*l); ic.stroke();
+  }
+  const inTex = new THREE.CanvasTexture(inC);
+  inTex.wrapS = inTex.wrapT = THREE.RepeatWrapping; inTex.repeat.set(3,3);
+  const inner = new THREE.Mesh(new THREE.CircleGeometry(9,64), new THREE.MeshStandardMaterial({map:inTex, roughness:0.9, metalness:0.0, envMapIntensity:0.4}));
+  inner.rotation.x = -Math.PI/2; inner.position.y = 0.02; scene.add(inner);
+
+  // White chalk ring border
+  const chalk = new THREE.Mesh(new THREE.RingGeometry(8.9,9.2,80), new THREE.MeshBasicMaterial({color:0xffffff,side:THREE.DoubleSide,opacity:0.7,transparent:true}));
+  chalk.rotation.x = -Math.PI/2; chalk.position.y = 0.03; scene.add(chalk);
+
+  buildTent();
+  buildBleachers();
+  addDecorations();
+  addStringLights();
+  loadAndPlaceCrowd();
+}
+
+function loadAndPlaceCrowd() {
+  const gltfLoader = new THREE.GLTFLoader();
+  const crowdFiles = ['a','b','c','d','e','f'];
+  const crowdModels = [];
+
+  const promises = crowdFiles.map(id =>
+    new Promise(resolve => {
+      gltfLoader.load(`models/crowd/person-${id}.glb`, gltf => {
+        crowdModels.push(gltf.scene);
+        resolve();
+      }, undefined, () => resolve());
+    })
+  );
+
+  Promise.all(promises).then(() => {
+    if (!crowdModels.length) return;
+    // Place crowd around the bleachers at radius ~11-13
+    const total = 28;
+    for (let i = 0; i < total; i++) {
+      const angle = (i / total) * Math.PI * 2;
+      const radius = 11.5 + (Math.random() - 0.5) * 1.5;
+      const model = crowdModels[i % crowdModels.length].clone(true);
+
+      // Scale to ~1.8 units tall
+      const box = new THREE.Box3().setFromObject(model);
+      const h = box.getSize(new THREE.Vector3()).y;
+      if (h > 0) model.scale.setScalar(1.8 / h);
+
+      model.position.set(
+        Math.cos(angle) * radius,
+        0,
+        Math.sin(angle) * radius
+      );
+      // Face inward toward center
+      model.rotation.y = angle + Math.PI;
+
+      // Slight random scale variation for natural look
+      const s = 0.85 + Math.random() * 0.3;
+      model.scale.multiplyScalar(s);
+
+      scene.add(model);
+    }
+  });
+}
+
+function buildTent() {
+  // Zebra diagonal stripe canvas texture
+  const tentCanvas = document.createElement('canvas');
+  tentCanvas.width = 512; tentCanvas.height = 512;
+  const tc = tentCanvas.getContext('2d');
+  tc.fillStyle = '#ffffff';
+  tc.fillRect(0, 0, 512, 512);
+  tc.fillStyle = '#111111';
+  const stripeW = 42;
+  for (let x = -512; x < 1024; x += stripeW * 2) {
+    tc.beginPath();
+    tc.moveTo(x, 0);
+    tc.lineTo(x + stripeW, 0);
+    tc.lineTo(x + stripeW + 512, 512);
+    tc.lineTo(x + 512, 512);
+    tc.closePath();
+    tc.fill();
+  }
+  const tentTex = new THREE.CanvasTexture(tentCanvas);
+  tentTex.wrapS = THREE.RepeatWrapping;
+  tentTex.wrapT = THREE.RepeatWrapping;
+  tentTex.repeat.set(4, 2);
+  const stripeMat = new THREE.MeshStandardMaterial({ map: tentTex, side: THREE.DoubleSide, roughness: 0.85, metalness: 0.0, envMapIntensity: 0.5 });
+
+  // Use the real Maya tent mesh when available
+  if (loadedModels['Tent']) {
+    const tent = loadedModels['Tent'].clone(true);
+    // The Maya tent was built to scale — fit to ~50 unit radius circus
+    const box    = new THREE.Box3().setFromObject(tent);
+    const size   = box.getSize(new THREE.Vector3());
+    const maxDim = Math.max(size.x, size.y, size.z);
+    if (maxDim > 0) tent.scale.setScalar(50 / maxDim);
+    const box2   = new THREE.Box3().setFromObject(tent);
+    const center = box2.getCenter(new THREE.Vector3());
+    tent.position.sub(center);
+    tent.position.y = 0;
+    // Apply red-white stripes to the real mesh
+    tent.traverse(c => {
+      if (c.isMesh) {
+        c.material = stripeMat;
+        c.castShadow = true;
+        c.receiveShadow = true;
+      }
+    });
+    scene.add(tent);
+    buildTentPoles();
+    addStringLights();
+    makeZebraSign();
+    return;
+  }
+
+  // ── Procedural fallback ────────────────────────────────────────────────────
+  // Walls
+  const wallGeo = new THREE.CylinderGeometry(24, 24, 17, 48, 1, true);
+  const wallMat = new THREE.MeshLambertMaterial({ map: tentTex, side: THREE.BackSide });
+  const wall = new THREE.Mesh(wallGeo, wallMat);
+  wall.position.y = 8.5;
+  scene.add(wall);
+
+  // Roof cone
+  const roofGeo = new THREE.ConeGeometry(24, 14, 48);
+  const roof = new THREE.Mesh(roofGeo, stripeMat);
+  roof.position.y = 24;
+  scene.add(roof);
+
+  // Top spike + flag
+  const spikeGeo = new THREE.ConeGeometry(0.4, 4, 8);
+  const spikeMat = new THREE.MeshPhongMaterial({ color: 0xffd700, emissive: 0x886600 });
+  const spike = new THREE.Mesh(spikeGeo, spikeMat);
+  spike.position.y = 33;
+  scene.add(spike);
+
+  // Zebra flag
+  const flagC = document.createElement('canvas');
+  flagC.width = 200; flagC.height = 100;
+  const fc = flagC.getContext('2d');
+  fc.fillStyle = '#e8c840'; fc.fillRect(0,0,200,100);
+  fc.fillStyle = '#000'; fc.font = 'bold 38px Arial'; fc.textAlign = 'center';
+  fc.fillText('ZEBRA',100,65);
+  const flagTex = new THREE.CanvasTexture(flagC);
+  const flagGeo = new THREE.PlaneGeometry(2, 1);
+  const flagMat = new THREE.MeshBasicMaterial({ map: flagTex, side: THREE.DoubleSide });
+  const flag = new THREE.Mesh(flagGeo, flagMat);
+  flag.position.set(1, 35.5, 0);
+  scene.add(flag);
+
+  buildTentPoles();
+  makeZebraSign();
+}
+
+function buildTentPoles() {
+  // Candy-stripe canvas
+  const pc = document.createElement('canvas'); pc.width = 64; pc.height = 256;
+  const pctx = pc.getContext('2d');
+  for (let i = 0; i < 8; i++) {
+    pctx.fillStyle = i%2===0 ? '#cc0000' : '#ffffff';
+    pctx.fillRect(0, i*32, 64, 32);
+  }
+  const poleTex = new THREE.CanvasTexture(pc);
+  poleTex.wrapT = THREE.RepeatWrapping; poleTex.repeat.set(1, 2);
+  const poleMat = new THREE.MeshStandardMaterial({ map: poleTex, roughness: 0.4, metalness: 0.6, envMapIntensity: 1.0 });
+  const baseMat = new THREE.MeshStandardMaterial({ color: 0x1a1a1a, roughness: 0.35, metalness: 0.85, envMapIntensity: 1.0 });
+
+  for (let i = 0; i < 10; i++) {
+    const a = (i/10)*Math.PI*2;
+    const x = Math.cos(a)*22, z = Math.sin(a)*22;
+    // Pole shaft
+    const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.13, 0.15, 19, 10), poleMat);
+    pole.position.set(x, 9.5, z); scene.add(pole);
+    // Metal base collar
+    const collar = new THREE.Mesh(new THREE.CylinderGeometry(0.22, 0.25, 0.3, 10), baseMat);
+    collar.position.set(x, 0.15, z); scene.add(collar);
+    // Top finial
+    const finial = new THREE.Mesh(new THREE.ConeGeometry(0.18, 0.5, 8), new THREE.MeshStandardMaterial({color:0xd4a800, roughness:0.25, metalness:0.95, envMapIntensity:1.2}));
+    finial.position.set(x, 19.3, z); scene.add(finial);
+  }
+}
+
+function makeZebraSign() {
+  const c = document.createElement('canvas');
+  c.width = 600; c.height = 150;
+  const ctx = c.getContext('2d');
+  ctx.fillStyle = '#000'; ctx.fillRect(0,0,600,150);
+  ctx.strokeStyle = '#e8c840'; ctx.lineWidth = 5;
+  ctx.strokeRect(4,4,592,142);
+  // Stripes
+  ctx.globalAlpha = 0.06;
+  for (let i = 0; i < 30; i++) {
+    ctx.fillStyle = '#fff'; ctx.fillRect(i*20,0,10,150);
+  }
+  ctx.globalAlpha = 1;
+  ctx.fillStyle = '#e8c840'; ctx.font = 'bold 80px Arial'; ctx.textAlign = 'center';
+  ctx.fillText('ZEBRA', 300, 108);
+
+  const t = new THREE.CanvasTexture(c);
+  const mesh = new THREE.Mesh(new THREE.PlaneGeometry(7,1.75), new THREE.MeshBasicMaterial({ map: t, side: THREE.DoubleSide }));
+  mesh.position.set(0, 5.5, -17);
+  scene.add(mesh);
+}
+
+function buildBleachers() {
+  const woodMat  = new THREE.MeshLambertMaterial({ color: 0x6b3e1c });
+  const darkWood = new THREE.MeshLambertMaterial({ color: 0x3e2008 });
+  const metalMat = new THREE.MeshLambertMaterial({ color: 0x2a2a2a });
+
+  for (let tier = 0; tier < 5; tier++) {
+    const r = 14 + tier * 1.4;
+    const y = tier * 0.55 + 0.28;
+
+    // Seat plank (flat torus = ring)
+    const seat = new THREE.Mesh(new THREE.TorusGeometry(r, 0.22, 3, 120), woodMat);
+    seat.rotation.x = Math.PI/2; seat.position.y = y; scene.add(seat);
+
+    // Riser face (vertical front of each tier)
+    const riser = new THREE.Mesh(new THREE.TorusGeometry(r, 0.12, 3, 120), darkWood);
+    riser.rotation.x = Math.PI/2; riser.position.y = y - 0.3; scene.add(riser);
+  }
+
+  // Vertical support struts every ~22°
+  for (let i = 0; i < 16; i++) {
+    const a = (i/16)*Math.PI*2;
+    const strut = new THREE.Mesh(new THREE.BoxGeometry(0.1, 3.5, 0.1), metalMat);
+    strut.position.set(Math.cos(a)*17.5, 1.75, Math.sin(a)*17.5); scene.add(strut);
+  }
+  // Crowd silhouettes
+  for (let i = 0; i < 40; i++) {
+    const a = (i/40)*Math.PI*2 + Math.random()*0.3;
+    const d = 14.5 + Math.random()*5.5;
+    addFigure(Math.cos(a)*d, Math.random()*2.5, Math.sin(a)*d);
+  }
+}
+
+function addFigure(x, y, z) {
+  const g = new THREE.Group();
+
+  const skinPalette  = [0xffdbac, 0xf5c5a3, 0xe0a882, 0xc68642, 0x8d5524, 0xd4a070];
+  const shirtPalette = [0xff3333, 0x3366ff, 0x33cc55, 0xffaa00, 0xcc44cc, 0x00ccdd, 0xff6699, 0xffee33, 0xff7733, 0x44aaff];
+  const pantsPalette = [0x1a1a33, 0x334455, 0x442211, 0x1e3a1e, 0x2a2a2a, 0x553311, 0x1a2a44];
+  const hairPalette  = [0x2b1800, 0x111111, 0xc8960c, 0xb22222, 0x777777, 0xf0e0a0, 0x3b1f0a];
+
+  const rnd = arr => arr[Math.floor(Math.random() * arr.length)];
+  const mat = c => new THREE.MeshLambertMaterial({ color: c });
+
+  const skinCol  = rnd(skinPalette);
+  const shirtCol = rnd(shirtPalette);
+  const pantsCol = rnd(pantsPalette);
+  const hairCol  = rnd(hairPalette);
+
+  const mSkin  = mat(skinCol);
+  const mShirt = mat(shirtCol);
+  const mPants = mat(pantsCol);
+  const mHair  = mat(hairCol);
+  const mShoe  = mat(0x1a0f05);
+
+  // Bench seat
+  const bench = new THREE.Mesh(new THREE.BoxGeometry(0.36, 0.05, 0.3), mat(0x5a3010));
+  bench.position.set(0, 0.43, 0.06); g.add(bench);
+
+  // Thighs (horizontal, pointing forward)
+  for (const sx of [-0.085, 0.085]) {
+    const thigh = new THREE.Mesh(new THREE.CylinderGeometry(0.055, 0.058, 0.36, 7), mPants);
+    thigh.rotation.x = Math.PI / 2;
+    thigh.position.set(sx, 0.45, 0.18); g.add(thigh);
+
+    // Shin (vertical, hanging down from knee)
+    const shin = new THREE.Mesh(new THREE.CylinderGeometry(0.047, 0.052, 0.42, 7), mPants);
+    shin.position.set(sx, 0.23, 0.37); g.add(shin);
+
+    // Shoe
+    const shoe = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.065, 0.17), mShoe);
+    shoe.position.set(sx, 0.03, 0.40); g.add(shoe);
+  }
+
+  // Hips
+  const hips = new THREE.Mesh(new THREE.BoxGeometry(0.24, 0.1, 0.16), mPants);
+  hips.position.set(0, 0.48, 0.02); g.add(hips);
+
+  // Torso (upright)
+  const torso = new THREE.Mesh(new THREE.BoxGeometry(0.27, 0.4, 0.13), mShirt);
+  torso.position.set(0, 0.72, -0.02); g.add(torso);
+
+  // Arms resting on thighs / lap
+  for (const sx of [-0.165, 0.165]) {
+    const upper = new THREE.Mesh(new THREE.CylinderGeometry(0.042, 0.046, 0.24, 6), mShirt);
+    upper.rotation.x = Math.PI * 0.42;
+    upper.position.set(sx, 0.66, 0.1); g.add(upper);
+
+    const lower = new THREE.Mesh(new THREE.CylinderGeometry(0.036, 0.042, 0.22, 6), mSkin);
+    lower.rotation.x = Math.PI * 0.5;
+    lower.position.set(sx, 0.46, 0.26); g.add(lower);
+  }
+
+  // Neck
+  const neck = new THREE.Mesh(new THREE.CylinderGeometry(0.044, 0.05, 0.1, 7), mSkin);
+  neck.position.set(0, 0.95, -0.01); g.add(neck);
+
+  // Head
+  const head = new THREE.Mesh(new THREE.SphereGeometry(0.115, 10, 9), mSkin);
+  head.position.set(0, 1.08, -0.01); g.add(head);
+
+  // Hair cap
+  const hair = new THREE.Mesh(new THREE.SphereGeometry(0.12, 10, 7, 0, Math.PI * 2, 0, Math.PI * 0.52), mHair);
+  hair.position.set(0, 1.08, -0.01); g.add(hair);
+
+  // Eyes
+  for (const ex of [-0.042, 0.042]) {
+    const eye = new THREE.Mesh(new THREE.SphereGeometry(0.018, 5, 5), mat(0x111111));
+    eye.position.set(ex, 1.085, 0.104); g.add(eye);
+  }
+
+  // Face toward center of ring, with a little random wobble
+  g.rotation.y = Math.atan2(x, z) + Math.PI + (Math.random() - 0.5) * 0.3;
+  g.position.set(x, y, z);
+  scene.add(g);
+}
+
+function addDecorations() {
+  const woodMat  = new THREE.MeshLambertMaterial({ color: 0x5c3010 });
+  const metalMat = new THREE.MeshLambertMaterial({ color: 0x333333 });
+  const goldMat  = new THREE.MeshLambertMaterial({ color: 0xd4a800 });
+
+  // Trapeze bar + ropes
+  const tbar = new THREE.Mesh(new THREE.CylinderGeometry(0.04,0.04,5,8), woodMat);
+  tbar.rotation.z = Math.PI/2; tbar.position.y = 17; scene.add(tbar);
+  for (const s of [-2.5,2.5]) {
+    const rope = new THREE.Mesh(new THREE.CylinderGeometry(0.015,0.015,9,4), new THREE.MeshLambertMaterial({color:0xb89040}));
+    rope.position.set(s,21.5,0); scene.add(rope);
+  }
+
+  // Wooden barrels (4 corners of the ring)
+  for (let i = 0; i < 4; i++) {
+    const a = (i/4)*Math.PI*2 + Math.PI/4;
+    const bx = Math.cos(a)*7.2, bz = Math.sin(a)*7.2;
+    // Stave body
+    const body = new THREE.Mesh(new THREE.CylinderGeometry(0.42,0.42,0.85,14), woodMat);
+    body.position.set(bx,0.425,bz); scene.add(body);
+    // Metal bands
+    for (const by of [0.15,0.42,0.7]) {
+      const band = new THREE.Mesh(new THREE.TorusGeometry(0.44,0.028,5,20), metalMat);
+      band.rotation.x = Math.PI/2; band.position.set(bx,by,bz); scene.add(band);
+    }
+    // Lid
+    const lid = new THREE.Mesh(new THREE.CylinderGeometry(0.42,0.42,0.055,14), woodMat);
+    lid.position.set(bx,0.88,bz); scene.add(lid);
+  }
+
+  // Performer's podium center-stage
+  const podium = new THREE.Mesh(new THREE.CylinderGeometry(0.55,0.65,1.1,16), woodMat);
+  podium.position.set(0,0.55,-2.5); scene.add(podium);
+  const podTop = new THREE.Mesh(new THREE.CylinderGeometry(0.58,0.58,0.07,16), goldMat);
+  podTop.position.set(0,1.13,-2.5); scene.add(podTop);
+
+  // Triangle bunting flags strung pole-to-pole
+  const buntingCols = [0xcc0000,0xffffff,0xcc0000,0xffffff,0xcc0000,0xffffff,0xcc0000,0xffffff];
+  for (let i = 0; i < 10; i++) {
+    const a0 = (i/10)*Math.PI*2, a1 = ((i+1)/10)*Math.PI*2;
+    const x0=Math.cos(a0)*22, z0=Math.sin(a0)*22;
+    const x1=Math.cos(a1)*22, z1=Math.sin(a1)*22;
+    const segments = 6;
+    for (let s = 0; s < segments; s++) {
+      const t = s/segments, t2 = (s+1)/segments;
+      const fx = x0+(x1-x0)*((t+t2)/2), fz = z0+(z1-z0)*((t+t2)/2);
+      const sag = Math.sin((t+t2)/2*Math.PI)*1.2;
+      const flag = new THREE.Mesh(
+        new THREE.ConeGeometry(0.25,0.55,3),
+        new THREE.MeshLambertMaterial({color:buntingCols[s%buntingCols.length],side:THREE.DoubleSide})
+      );
+      flag.position.set(fx, 19-sag, fz);
+      flag.rotation.x = Math.PI; scene.add(flag);
+    }
+  }
+}
+
+function addStringLights() {
+  const cols = [0xff2020,0x22ff22,0x2222ff,0xffff22,0xff22ff,0x22ffff];
+  for (let r = 0; r < 4; r++) {
+    const rad = 8 + r*3.5, h = 13 - r*1.5, cnt = 18+r*10;
+    for (let i = 0; i < cnt; i++) {
+      const a = (i/cnt)*Math.PI*2;
+      const bGeo = new THREE.SphereGeometry(0.07,6,6);
+      const bMat = new THREE.MeshBasicMaterial({ color: cols[Math.floor(Math.random()*cols.length)] });
+      const b = new THREE.Mesh(bGeo, bMat);
+      b.position.set(Math.cos(a)*rad, h, Math.sin(a)*rad);
+      scene.add(b);
+    }
+  }
+}
+
+// ═══════════════════════════════════════════════
+//  WEAPON MESHES
+// ═══════════════════════════════════════════════
+
+function makeWeaponMesh(w) {
+  // Use the real exported GLB when available, else fall back to procedural
+  if (loadedModels[w.id]) {
+    return makeRealMesh(w);
+  }
+  return makeProceduralMesh(w);
+}
+
+function makeRealMesh(w) {
+  const g = new THREE.Group();
+  const model = loadedModels[w.id].clone(true);
+  g.add(model);
+
+  model.traverse(child => {
+    if (!child.isMesh) return;
+    // Use embedded GLB material — clone so we can tweak without affecting the cache
+    if (child.material) {
+      child.material = child.material.clone();
+      child.material.emissive = new THREE.Color(w.accent);
+      child.material.emissiveIntensity = 0.04;
+      // PBR housing. No environment reflection — the weapon is camera-attached,
+      // so a world-fixed env map would make its shine shift as you pitch up/down.
+      if ('roughness' in child.material) child.material.roughness = 0.5;
+      if ('metalness' in child.material) child.material.metalness = 0.0;
+      child.material.envMap = null;
+      child.material.envMapIntensity = 0;
+      child.material.needsUpdate = true;
+    }
+    child.castShadow    = true;
+    child.receiveShadow = true;
+  });
+
+  addWeaponLabel(g, w);
+  return g;
+}
+
+function makeProceduralMesh(w) {
+  const g = new THREE.Group();
+  const body = new THREE.MeshPhongMaterial({ color: w.color, shininess: 70 });
+  const acc  = new THREE.MeshPhongMaterial({ color: w.accent, shininess: 120, emissive: w.accent, emissiveIntensity: 0.25 });
+  const scrn = new THREE.MeshStandardMaterial({ color: 0x001122, emissive: new THREE.Color(w.accent), emissiveIntensity: 0.6 });
+
+  // Photo material for front face (+Z) — falls back to body colour
+  const photo = photoTextures[w.id];
+  const frontMat = photo
+    ? new THREE.MeshStandardMaterial({ map: photo, transparent: true, roughness: 0.5, metalness: 0.05 })
+    : body;
+
+  // BoxGeometry face-material order: +X, -X, +Y, -Y, +Z (front), -Z (back)
+  function photoBox(geo) {
+    return new THREE.Mesh(geo, [body, body, body, body, frontMat, body]);
+  }
+
+  if (w.shape === 'brick') {
+    const main = photoBox(new THREE.BoxGeometry(0.32,0.72,0.12)); g.add(main);
+    const grip = new THREE.Mesh(new THREE.BoxGeometry(0.24,0.22,0.13), body); grip.position.y=-0.47; g.add(grip);
+    const stripe = new THREE.Mesh(new THREE.BoxGeometry(0.09,0.72,0.13), acc); stripe.position.x=0.155; g.add(stripe);
+    const scan = new THREE.Mesh(new THREE.BoxGeometry(0.3,0.04,0.14), acc); scan.position.set(0,0.28,0); g.add(scan);
+  } else if (w.shape === 'slim') {
+    const main = photoBox(new THREE.BoxGeometry(0.23,0.55,0.09)); g.add(main);
+    const grip = new THREE.Mesh(new THREE.BoxGeometry(0.18,0.18,0.1), body); grip.position.y=-0.365; g.add(grip);
+    const stripe = new THREE.Mesh(new THREE.BoxGeometry(0.06,0.55,0.1), acc); stripe.position.x=0.145; g.add(stripe);
+  } else if (w.shape === 'ring') {
+    const ring = new THREE.Mesh(new THREE.TorusGeometry(0.13,0.035,8,32), body); g.add(ring);
+    const scan = new THREE.Mesh(new THREE.BoxGeometry(0.13,0.07,0.055), acc); scan.position.y=0.13; g.add(scan);
+    const trig = new THREE.Mesh(new THREE.BoxGeometry(0.04,0.09,0.035), body); trig.position.set(0,-0.06,-0.1); g.add(trig);
+    const led = new THREE.Mesh(new THREE.SphereGeometry(0.02,8,8), new THREE.MeshBasicMaterial({color:w.accent})); led.position.set(0,0.17,0); g.add(led);
+    // PS30 badge showing real photo
+    if (photo) {
+      const badge = new THREE.Mesh(new THREE.PlaneGeometry(0.12,0.12), frontMat);
+      badge.position.set(0,0.13,0.03); g.add(badge);
+    }
+  } else if (w.shape === 'pistol') {
+    const main = new THREE.Mesh(new THREE.BoxGeometry(0.11,0.18,0.32), body); g.add(main);
+    const barrel = new THREE.Mesh(new THREE.BoxGeometry(0.07,0.07,0.22), acc); barrel.position.set(0,0.06,0.27); g.add(barrel);
+    const handle = new THREE.Mesh(new THREE.BoxGeometry(0.09,0.22,0.1), body); handle.position.set(0,-0.18,-0.05); handle.rotation.x=0.18; g.add(handle);
+    const trig = new THREE.Mesh(new THREE.BoxGeometry(0.025,0.05,0.035), acc); trig.position.set(0,-0.04,0.04); g.add(trig);
+    const scan = new THREE.Mesh(new THREE.PlaneGeometry(0.09,0.09), scrn); scan.position.set(0,0.025,0.385); g.add(scan);
+  } else if (w.shape === 'tablet') {
+    const main = photoBox(new THREE.BoxGeometry(0.52,0.34,0.1)); g.add(main);
+    const grip = new THREE.Mesh(new THREE.CylinderGeometry(0.028,0.028,0.52,8), acc); grip.rotation.z=Math.PI/2; grip.position.y=-0.2; g.add(grip);
+    const scan = new THREE.Mesh(new THREE.BoxGeometry(0.52,0.04,0.11), acc); scan.position.y=0.19; g.add(scan);
+  }
+
+  // Zebra logo dot
+  const logo = new THREE.Mesh(new THREE.CircleGeometry(0.025,8), new THREE.MeshBasicMaterial({color:0xe8c840}));
+  logo.position.set(0, 0.2, 0.08);
+  g.add(logo);
+
+  addWeaponLabel(g, w);
+  return g;
+}
+
+function addWeaponLabel(group, w) {
+  const lc = document.createElement('canvas');
+  lc.width=160; lc.height=40;
+  const lctx=lc.getContext('2d');
+  lctx.fillStyle='#000'; lctx.fillRect(0,0,160,40);
+  lctx.fillStyle='#e8c840'; lctx.font='bold 18px Arial'; lctx.textAlign='center';
+  lctx.fillText(w.name,80,27);
+  const lt = new THREE.CanvasTexture(lc);
+  const lm = new THREE.Mesh(new THREE.PlaneGeometry(0.2,0.05), new THREE.MeshBasicMaterial({map:lt}));
+  lm.position.set(0,-0.38,0.1);
+  group.add(lm);
+}
+
+function spawnWeapons() {
+  WEAPONS.forEach((w, i) => {
+    const mesh = makeWeaponMesh(w);
+    const a = (i / WEAPONS.length) * Math.PI * 2;
+    const d = 5 + (i%3)*1.5;
+    mesh.position.set(Math.cos(a)*d, 0.45, Math.sin(a)*d);
+    mesh.rotation.y = Math.random()*Math.PI*2;
+
+    const geoGlow = new THREE.SphereGeometry(0.5,8,8);
+    const matGlow = new THREE.MeshBasicMaterial({color:w.accent,transparent:true,opacity:0.08});
+    const glow = new THREE.Mesh(geoGlow,matGlow);
+    mesh.add(glow);
+
+    const pl = new THREE.PointLight(w.accent, 0.7, 2.5);
+    pl.position.copy(mesh.position);
+    scene.add(pl);
+    scene.add(mesh);
+
+    weaponObjs.push({ mesh, w, pl, collected:false, bob:Math.random()*Math.PI*2 });
+  });
+}
+
+// ═══════════════════════════════════════════════
+//  BALLOONS
+// ═══════════════════════════════════════════════
+const BAL_COLORS = [0xff2222,0x2266ff,0xffee00,0x22dd44,0xff44dd,0xff8822,0x44eeff,0xff6688];
+
+const BARCODE_TYPES = ['qr','code128','datamatrix','upc','pdf417'];
+
+// Generates a canvas texture that mimics a real scannable symbology.
+function makeBarcodeTexture(type, seed) {
+  const c = document.createElement('canvas');
+  c.width = 256; c.height = 256;
+  const ctx = c.getContext('2d');
+  ctx.fillStyle = '#fff'; ctx.fillRect(0,0,256,256);
+  ctx.fillStyle = '#000';
+  let rng = (seed>>>0) || 1;
+  const rand = () => { rng = (rng*1664525+1013904223)>>>0; return rng/4294967296; };
+
+  if (type === 'qr') {
+    const ox=28, oy=28, mod=8, n=25;
+    for (let r=0;r<n;r++) for (let col=0;col<n;col++) {
+      if (r<7&&col<7) continue; if (r<7&&col>=n-7) continue; if (r>=n-7&&col<7) continue;
+      if (rand()>0.5) ctx.fillRect(ox+col*mod, oy+r*mod, mod, mod);
+    }
+    const finder=(x,y)=>{ctx.fillStyle='#000';ctx.fillRect(x,y,50,50);ctx.fillStyle='#fff';ctx.fillRect(x+7,y+7,36,36);ctx.fillStyle='#000';ctx.fillRect(x+14,y+14,22,22);};
+    finder(ox,oy); finder(ox+(n-7)*mod,oy); finder(ox,oy+(n-7)*mod);
+
+  } else if (type === 'datamatrix') {
+    const ox=40, oy=40, mod=9, n=18;
+    ctx.fillRect(ox, oy, mod, n*mod);              // solid left border
+    ctx.fillRect(ox, oy+(n-1)*mod, n*mod, mod);    // solid bottom border
+    for (let i=0;i<n;i+=2){ ctx.fillRect(ox+i*mod,oy,mod,mod); ctx.fillRect(ox+(n-1)*mod,oy+i*mod,mod,mod); } // timing
+    for (let r=1;r<n-1;r++) for (let col=1;col<n-1;col++) if (rand()>0.5) ctx.fillRect(ox+col*mod, oy+r*mod, mod, mod);
+
+  } else if (type === 'code128') {
+    const top=52, h=140; let x=22;
+    ctx.fillRect(20,top,3,h);                      // start bars
+    while (x<226){ const w=1+Math.floor(rand()*4); if (rand()>0.4) ctx.fillRect(x,top,w,h); x+=w+1+Math.floor(rand()*3); }
+    ctx.fillRect(228,top,3,h);                      // stop bars
+    ctx.font='bold 26px monospace'; ctx.textAlign='center';
+    let s=''; for (let i=0;i<10;i++) s+=Math.floor(rand()*10);
+    ctx.fillText(s,128,224);
+
+  } else if (type === 'upc') {
+    const top=48, h=140; let x=30;
+    const guard=(gx)=>{ ctx.fillRect(gx,top,2,h+16); ctx.fillRect(gx+3,top,2,h+16); };
+    guard(28); x=40;
+    for (let g=0; g<24; g++){ const w=1+Math.floor(rand()*3); if (rand()>0.42) ctx.fillRect(x,top,w,h); x+=w+1; }
+    guard(122); x=134;
+    for (let g=0; g<24; g++){ const w=1+Math.floor(rand()*3); if (rand()>0.42) ctx.fillRect(x,top,w,h); x+=w+1; }
+    guard(224);
+    ctx.font='bold 22px monospace'; ctx.textAlign='center';
+    let s=''; for (let i=0;i<12;i++) s+=Math.floor(rand()*10);
+    ctx.fillText(s,128,228);
+
+  } else { // pdf417 — stacked linear rows
+    const top=54, rows=8, rh=16;
+    for (let r=0;r<rows;r++){ let x=24; const y=top+r*(rh+2);
+      ctx.fillRect(x,y,5,rh); x+=7;               // row start
+      while (x<218){ const w=1+Math.floor(rand()*4); if (rand()>0.45) ctx.fillRect(x,y,w,rh); x+=w+1; }
+      ctx.fillRect(223,y,5,rh);                    // row stop
+    }
+  }
+
+  ctx.strokeStyle='#e8c840'; ctx.lineWidth=4; ctx.strokeRect(3,3,250,250);
+  return new THREE.CanvasTexture(c);
+}
+
+function makeBalloon() {
+  const color = BAL_COLORS[Math.floor(Math.random()*BAL_COLORS.length)];
+  const g = new THREE.Group();
+  const bMat = new THREE.MeshPhongMaterial({ color, shininess:120, specular:0xffffff });
+  const balloon = new THREE.Mesh(new THREE.SphereGeometry(0.38,16,16), bMat);
+  balloon.scale.y = 1.28; g.add(balloon);
+  const knot = new THREE.Mesh(new THREE.SphereGeometry(0.055,6,6), new THREE.MeshPhongMaterial({color}));
+  knot.position.y=-0.49; g.add(knot);
+  const str = new THREE.Mesh(new THREE.CylinderGeometry(0.008,0.008,1.4,4), new THREE.MeshBasicMaterial({color:0xffffff,transparent:true,opacity:0.6}));
+  str.position.y=-1.2; g.add(str);
+
+  // Scannable barcode tag — random symbology, billboarded toward the player each frame
+  const type = BARCODE_TYPES[Math.floor(Math.random()*BARCODE_TYPES.length)];
+  const tag = new THREE.Mesh(
+    new THREE.PlaneGeometry(0.34, 0.34),
+    new THREE.MeshBasicMaterial({ map: makeBarcodeTexture(type, (Math.random()*1e9)|0) })
+  );
+  tag.position.set(0, 0.05, 0.42);
+  g.add(tag);
+  g.userData.tag = tag;
+  return g;
+}
+
+function spawnBalloons(n) {
+  for (let i = 0; i < n; i++) {
+    const b = makeBalloon();
+    const a = Math.random()*Math.PI*2, d = Math.random()*17+1;
+    b.position.set(Math.cos(a)*d, 2+Math.random()*9, Math.sin(a)*d);
+    scene.add(b);
+    balloons.push({ mesh:b, bob:Math.random()*Math.PI*2, spd:0.4+Math.random()*0.6, alive:true, da:Math.random()*Math.PI*2, ds:(Math.random()-0.5)*0.008 });
+  }
+}
+
+function respawnBalloon(bo) {
+  const a = Math.random()*Math.PI*2, d = Math.random()*17+1;
+  bo.mesh.position.set(Math.cos(a)*d, 2+Math.random()*9, Math.sin(a)*d);
+  bo.mesh.scale.set(1,1,1); bo.mesh.visible=true; bo.alive=true;
+}
+
+function popBalloon(bo, weapon) {
+  if (!bo.alive) return;
+  bo.alive = false; bo.mesh.visible = false;
+  const pos = bo.mesh.position.clone();
+  const color = bo.mesh.children[0].material.color.getHex();
+
+  // Particles
+  for (let i = 0; i < 18; i++) {
+    const pm = new THREE.Mesh(new THREE.SphereGeometry(0.05+Math.random()*0.08,5,5), new THREE.MeshBasicMaterial({color,transparent:true,opacity:1}));
+    pm.position.copy(pos);
+    const vel = new THREE.Vector3((Math.random()-0.5)*0.18, Math.random()*0.14+0.04, (Math.random()-0.5)*0.18);
+    scene.add(pm);
+    particles.push({ mesh:pm, mat:pm.material, vel, life:1.0, alive:true });
+  }
+  // Light flash
+  const fl = new THREE.PointLight(weapon.projColor, 8, 5);
+  fl.position.copy(pos); scene.add(fl);
+  setTimeout(()=>scene.remove(fl),180);
+
+  // Scanner "read" reticle over the target
+  showScanMarker(pos);
+
+  // Floating score text (DOM)
+  showFloatingScore(weapon.pts);
+
+  setTimeout(() => { if(gameActive) respawnBalloon(bo); }, 3500+Math.random()*2000);
+}
+
+// Green "+" targeting reticle with corner brackets — like a barcode scanner locking on.
+let _scanReticleTex = null;
+function scanReticleTexture() {
+  if (_scanReticleTex) return _scanReticleTex;
+  const c = document.createElement('canvas'); c.width=128; c.height=128;
+  const x = c.getContext('2d');
+  x.strokeStyle='#00ff66'; x.lineCap='round';
+  // plus
+  x.lineWidth=7;
+  x.beginPath(); x.moveTo(64,30); x.lineTo(64,98); x.moveTo(30,64); x.lineTo(98,64); x.stroke();
+  // corner brackets
+  x.lineWidth=6; const b=18, o=10;
+  [[o,o,1,1],[128-o,o,-1,1],[o,128-o,1,-1],[128-o,128-o,-1,-1]].forEach(([cx,cy,sx,sy])=>{
+    x.beginPath(); x.moveTo(cx,cy+sy*b); x.lineTo(cx,cy); x.lineTo(cx+sx*b,cy); x.stroke();
+  });
+  _scanReticleTex = new THREE.CanvasTexture(c);
+  return _scanReticleTex;
+}
+
+function showScanMarker(pos) {
+  const m = new THREE.Mesh(
+    new THREE.PlaneGeometry(1, 1),
+    new THREE.MeshBasicMaterial({ map: scanReticleTexture(), transparent:true, depthTest:false, depthWrite:false })
+  );
+  m.position.copy(pos);
+  m.renderOrder = 999;
+  scene.add(m);
+  scanMarkers.push({ mesh:m, mat:m.material, life:1.0 });
+}
+
+// ═══════════════════════════════════════════════
+//  QR CODES
+// ═══════════════════════════════════════════════
+function makeQRTexture(w) {
+  const c = document.createElement('canvas');
+  c.width=256; c.height=256;
+  const ctx=c.getContext('2d');
+  ctx.fillStyle='#fff'; ctx.fillRect(0,0,256,256);
+  ctx.fillStyle='#000';
+
+  // Corner finder patterns
+  function finder(x,y) {
+    ctx.fillStyle='#000'; ctx.fillRect(x,y,56,56);
+    ctx.fillStyle='#fff'; ctx.fillRect(x+7,y+7,42,42);
+    ctx.fillStyle='#000'; ctx.fillRect(x+14,y+14,28,28);
+  }
+  finder(8,8); finder(192,8); finder(8,192);
+  ctx.fillStyle='#000';
+
+  // Pseudo-random data modules
+  const seed = w.id.split('').reduce((a,c)=>a+c.charCodeAt(0),0);
+  for (let row=0;row<21;row++) {
+    for (let col=0;col<21;col++) {
+      if (row<9&&col<9) continue;
+      if (row<9&&col>11) continue;
+      if (row>11&&col<9) continue;
+      const v = Math.sin(row*17+col*11+seed)*Math.cos(row*7-col*13+seed)>0.1;
+      if (v) ctx.fillRect(72+col*9,72+row*9,8,8);
+    }
+  }
+
+  // Border & label
+  ctx.strokeStyle='#e8c840'; ctx.lineWidth=5; ctx.strokeRect(3,3,250,250);
+  ctx.fillStyle='#000'; ctx.font='bold 13px Arial'; ctx.textAlign='center';
+  ctx.fillText(w.name,128,245);
+
+  return new THREE.CanvasTexture(c);
+}
+
+function placeQRCodes() {
+  WEAPONS.forEach((w, i) => {
+    // Place each QR code right beside its weapon so it's easy to find.
+    // Weapons sit at angle (i/N)*2π, radius 5-6.5.
+    // QR board goes at the same angle but radius 9, slightly to the side.
+    const weaponAngle = (i / WEAPONS.length) * Math.PI * 2;
+    const sideOffset  = Math.PI * 0.18; // ~32° to the side of the weapon
+    const a = weaponAngle + sideOffset;
+    const d = 9;
+    const h = 2.2;
+    const x = Math.cos(a) * d;
+    const z = Math.sin(a) * d;
+
+    const g = new THREE.Group();
+
+    // Board
+    const board = new THREE.Mesh(
+      new THREE.BoxGeometry(1.6, 1.6, 0.06),
+      new THREE.MeshLambertMaterial({ color: 0x111111 })
+    );
+    g.add(board);
+
+    // QR face
+    const qr = new THREE.Mesh(
+      new THREE.PlaneGeometry(1.4, 1.4),
+      new THREE.MeshBasicMaterial({ map: makeQRTexture(w) })
+    );
+    qr.position.z = 0.035;
+    g.add(qr);
+
+    // Label strip
+    const lc = document.createElement('canvas');
+    lc.width = 300; lc.height = 70;
+    const lctx = lc.getContext('2d');
+    lctx.fillStyle = '#000'; lctx.fillRect(0, 0, 300, 70);
+    lctx.fillStyle = '#e8c840'; lctx.font = 'bold 24px Arial';
+    lctx.textAlign = 'center'; lctx.fillText(w.name, 150, 45);
+    const lt = new THREE.CanvasTexture(lc);
+    const lm = new THREE.Mesh(
+      new THREE.PlaneGeometry(1.6, 0.42),
+      new THREE.MeshBasicMaterial({ map: lt })
+    );
+    lm.position.set(0, 1.01, 0.035);
+    g.add(lm);
+
+    // Post
+    const post = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.05, 0.06, h, 8),
+      new THREE.MeshLambertMaterial({ color: 0x333333 })
+    );
+    post.position.y = -(h / 2 + 0.8);
+    g.add(post);
+
+    g.position.set(x, h + 0.8, z);
+    g.lookAt(0, h + 0.8, 0);
+    scene.add(g);
+    qrObjs.push({ g, w, scanned: false });
+  });
+}
+
+// ═══════════════════════════════════════════════
+//  CONTROLS
+// ═══════════════════════════════════════════════
+function bindControls() {
+  const canvas = document.getElementById('game-canvas');
+
+  canvas.addEventListener('click', () => {
+    if (!infoOpen && gameActive) canvas.requestPointerLock();
+  });
+
+  document.addEventListener('pointerlockchange', () => {
+    isLocked = document.pointerLockElement === canvas;
+  });
+
+  document.addEventListener('mousemove', e => {
+    // Pointer-lock mode (mouse hidden), OR click-drag fallback when lock is unavailable.
+    if (!isLocked && !(mouseDown && gameActive && !infoOpen)) return;
+    const s = 0.0018;
+    yaw   -= e.movementX * s;
+    pitch  = Math.max(-1.4, Math.min(1.4, pitch - e.movementY * s));
+  });
+
+  document.addEventListener('mousedown', e => {
+    if (e.button!==0) return;
+    mouseDown=true;
+    // Fire regardless of pointer-lock state so the app is playable even if lock fails.
+    if (gameActive && !infoOpen) shoot();
+  });
+  document.addEventListener('mouseup', e => { if(e.button===0) mouseDown=false; });
+
+  document.addEventListener('keydown', e => {
+    keys[e.code] = true;
+    if (e.code==='KeyE') tryPickup();
+    if (e.code==='Digit1') trySwitch(0);
+    if (e.code==='Digit2') trySwitch(1);
+    if (e.code==='Digit3') trySwitch(2);
+    if (e.code==='Digit4') trySwitch(3);
+    if (e.code==='Digit5') trySwitch(4);
+    if (e.code==='Digit6') trySwitch(5);
+    if (e.code==='Escape') closeInfo();
+  });
+  document.addEventListener('keyup', e => { keys[e.code]=false; });
+}
+
+function tryPickup() {
+  let best=null, bestD=2.8;
+  weaponObjs.forEach(o => {
+    if (o.collected) return;
+    const d = camera.position.distanceTo(o.mesh.position);
+    if (d<bestD) { bestD=d; best=o; }
+  });
+  if (best) pickupWeapon(best);
+}
+
+function pickupWeapon(obj) {
+  obj.collected = true;
+  const idx = WEAPONS.indexOf(obj.w);
+  collected.add(idx);
+  obj.pl.intensity = 0;
+
+  // Pickup anim
+  let t=0;
+  const startY = obj.mesh.position.y;
+  const go = () => {
+    t+=0.06;
+    if (t<=1) {
+      obj.mesh.position.y = startY + t*0.6;
+      obj.mesh.scale.setScalar(1-t);
+      requestAnimationFrame(go);
+    } else scene.remove(obj.mesh);
+  };
+  go();
+
+  // UI
+  const slot = document.getElementById('slot-'+idx);
+  slot.classList.remove('empty'); slot.classList.add('has-it');
+
+  if (currentWeapon===-1) trySwitch(idx);
+  flashScreen(obj.w.accent, 0.35);
+  showPrompt('Picked up '+obj.w.name+'!', 2200);
+  addKillFeed(obj.w.name + ' equipped');
+}
+
+function trySwitch(idx) {
+  if (!collected.has(idx)) return;
+  currentWeapon = idx;
+  for (let i=0;i<6;i++) {
+    const s=document.getElementById('slot-'+i);
+    if (collected.has(i)) {
+      s.classList.remove('empty');
+      s.classList.toggle('active', i===idx);
+      s.classList.toggle('has-it', i!==idx);
+    }
+  }
+  rebuildHeldMesh();
+  weaponFlipStart = performance.now();
+  // Update weapon info HUD
+  const wi = document.getElementById('weapon-info');
+  document.getElementById('wi-name').textContent = WEAPONS[idx].name + ' — ' + WEAPONS[idx].effectName;
+  document.getElementById('wi-effect').textContent = WEAPONS[idx].effectDesc;
+  wi.style.display = 'block';
+}
+
+function rebuildHeldMesh() {
+  if (heldMesh) { camera.remove(heldMesh); heldMesh=null; }
+  if (currentWeapon<0) return;
+  heldMesh = makeWeaponMesh(WEAPONS[currentWeapon]);
+  heldMesh.position.set(0.18, -0.34, -0.90);
+  heldMesh.rotation.set(-0.10, -1.2 + Math.PI + 75*Math.PI/180, 0.04);
+  heldMesh.scale.setScalar(0.9);
+  camera.add(heldMesh);
+}
+
+// ═══════════════════════════════════════════════
+//  SHOOTING
+// ═══════════════════════════════════════════════
+function shoot() {
+  if (currentWeapon<0) { showPrompt('Press E near a weapon to pick it up!',1800); return; }
+  const w = WEAPONS[currentWeapon];
+  const now = Date.now();
+  if (now-lastShot < w.fireRate) return;
+  lastShot = now;
+
+  // Kick animation
+  if (heldMesh) {
+    heldMesh.position.z = -1.00;
+    setTimeout(()=>{ if(heldMesh) heldMesh.position.z=-0.90; },70);
+  }
+
+  switch(w.effect) {
+    case 'laser':    fireLaser(w);   break;
+    case 'rapid':    fireProjectile(w,0);   break;
+    case 'ring':     fireRing(w);    break;
+    case 'scatter':  for(let i=0;i<w.count;i++) fireProjectile(w,w.spread); break;
+    case 'precision':fireProjectile(w,0);   break;
+    case 'cryo':     fireCryo(w);    break;
+  }
+}
+
+function getDir(spread=0) {
+  const d = new THREE.Vector3(0,0,-1).applyQuaternion(camera.quaternion);
+  if (spread) {
+    d.x += (Math.random()-0.5)*spread;
+    d.y += (Math.random()-0.5)*spread;
+    d.normalize();
+  }
+  return d;
+}
+
+function fireLaser(w) {
+  const dir = getDir();
+  const origin = camera.position.clone().addScaledVector(dir, 0.5);
+
+  // Raycast instant hit
+  rayHit(origin, dir, w);
+
+  // Visual beam
+  const len = 35;
+  const bGeo = new THREE.CylinderGeometry(0.03,0.04,len,8);
+  const bMat = new THREE.MeshBasicMaterial({color:w.projColor,transparent:true,opacity:0.85});
+  const beam = new THREE.Mesh(bGeo,bMat);
+  beam.quaternion.setFromUnitVectors(new THREE.Vector3(0,1,0), dir);
+  beam.position.copy(origin).addScaledVector(dir,len/2);
+  scene.add(beam);
+
+  // Glow core
+  const gMat = new THREE.MeshBasicMaterial({color:0xffffff,transparent:true,opacity:0.6});
+  const gBeam = new THREE.Mesh(new THREE.CylinderGeometry(0.01,0.01,len,6), gMat);
+  gBeam.quaternion.copy(beam.quaternion);
+  gBeam.position.copy(beam.position);
+  scene.add(gBeam);
+
+  let t=0;
+  const fade = setInterval(()=>{
+    t+=0.12;
+    bMat.opacity=0.85*(1-t); gMat.opacity=0.6*(1-t);
+    if(t>=1){ clearInterval(fade); scene.remove(beam); scene.remove(gBeam); }
+  },30);
+}
+
+function fireProjectile(w, spread) {
+  const dir = getDir(spread);
+  const pos = camera.position.clone().addScaledVector(dir,0.5);
+
+  const geo = new THREE.SphereGeometry(0.07,8,8);
+  const mat = new THREE.MeshBasicMaterial({color:w.projColor});
+  const mesh = new THREE.Mesh(geo,mat);
+  mesh.position.copy(pos);
+
+  const pl = new THREE.PointLight(w.projColor, 1.5, 2.5);
+  mesh.add(pl);
+  scene.add(mesh);
+
+  // Trail
+  const trGeo = new THREE.CylinderGeometry(0.025,0.025,0.28,4);
+  const trMat = new THREE.MeshBasicMaterial({color:w.projColor,transparent:true,opacity:0.4});
+  const trail = new THREE.Mesh(trGeo,trMat);
+  trail.quaternion.setFromUnitVectors(new THREE.Vector3(0,1,0),dir);
+  trail.position.addScaledVector(dir,-0.18);
+  mesh.add(trail);
+
+  projectiles.push({ mesh, dir, speed:w.projSpeed, w, alive:true, dist:0 });
+}
+
+function fireRing(w) {
+  const dir = new THREE.Vector3();
+  camera.getWorldDirection(dir);
+  const center = camera.position.clone().addScaledVector(dir, 2.0);
+  // Pop only the closest balloon in radius
+  let closest = null, closestD = Infinity;
+  balloons.forEach(b=>{
+    if(!b.alive) return;
+    const d = center.distanceTo(b.mesh.position);
+    if(d<w.areaR && d<closestD){ closest=b; closestD=d; }
+  });
+  if(closest){ popBalloon(closest,w); addScore(w.pts); }
+  // Scan only the QR code the crosshair is aimed at
+  const qDir = new THREE.Vector3();
+  camera.getWorldDirection(qDir);
+  const qRay = new THREE.Raycaster(camera.position, qDir, 0, 50);
+  const qHits = qRay.intersectObjects(qrObjs.map(q=>q.g), true);
+  if (qHits.length > 0) {
+    let hitQ = null;
+    const ho = qHits[0].object;
+    qrObjs.forEach(q=>{ let o=ho; while(o){if(o===q.g){hitQ=q;break;}o=o.parent;} });
+    if (hitQ) scanQR(hitQ);
+  }
+  createRingWave(center, w.areaR, w.projColor);
+  addKillFeed('RING SHOCKWAVE' + (closest ? ' +'+w.pts+'pts!' : ''));
+}
+
+function fireCryo(w) {
+  const dir = getDir(w.spread);
+  const pos = camera.position.clone().addScaledVector(dir,0.5);
+
+  // Projectile that explodes on hit
+  const geo = new THREE.SphereGeometry(0.12,10,10);
+  const mat = new THREE.MeshBasicMaterial({color:w.projColor});
+  const mesh = new THREE.Mesh(geo,mat);
+  mesh.position.copy(pos);
+  const pl = new THREE.PointLight(w.projColor,2,3);
+  mesh.add(pl);
+  scene.add(mesh);
+
+  // Mark as cryo for special hit handling
+  projectiles.push({ mesh, dir, speed:w.projSpeed, w, alive:true, dist:0, isCryo:true });
+}
+
+function explodeCryo(pos, w) {
+  // Ice shards
+  for(let i=0;i<25;i++){
+    const shGeo = new THREE.ConeGeometry(0.04,0.2,4);
+    const shMat = new THREE.MeshBasicMaterial({color:w.projColor,transparent:true,opacity:1});
+    const sh = new THREE.Mesh(shGeo,shMat);
+    sh.position.copy(pos);
+    const vel = new THREE.Vector3((Math.random()-0.5)*0.22,(Math.random()-0.5)*0.22,(Math.random()-0.5)*0.22);
+    scene.add(sh);
+    particles.push({mesh:sh,mat:shMat,vel,life:1.2,alive:true});
+  }
+  createRingWave(pos, w.areaR, w.projColor);
+  createRingWave(pos, w.areaR*0.4, 0xffffff);
+  const fl=new THREE.PointLight(0x88ffff,12,8); fl.position.copy(pos); scene.add(fl);
+  setTimeout(()=>scene.remove(fl),250);
+
+  let popped=0;
+  balloons.forEach(b=>{
+    if(!b.alive) return;
+    if(pos.distanceTo(b.mesh.position)<w.areaR){ popBalloon(b,w); popped++; }
+  });
+  if(popped>0) addScore(popped*w.pts);
+  if(popped>1) addKillFeed('CRYO BLAST — '+popped+' balloons frozen!');
+}
+
+function rayHit(origin, dir, w) {
+  const ray = new THREE.Raycaster(origin, dir, 0, 50);
+
+  // Balloon hits
+  const bMeshes = balloons.filter(b=>b.alive).map(b=>b.mesh);
+  const bHits = ray.intersectObjects(bMeshes, true);
+  if (bHits.length>0) {
+    const hitObj = bHits[0].object;
+    let bo = null;
+    balloons.forEach(b=>{ let o=hitObj; while(o){if(o===b.mesh){bo=b;break;}o=o.parent;} });
+    if(bo&&bo.alive){ popBalloon(bo,w); addScore(w.pts); }
+  }
+
+  // QR hits
+  const qHits = ray.intersectObjects(qrObjs.map(q=>q.g), true);
+  if (qHits.length>0) {
+    let hitQ=null;
+    const ho=qHits[0].object;
+    qrObjs.forEach(q=>{ let o=ho; while(o){if(o===q.g){hitQ=q;break;}o=o.parent;} });
+    if(hitQ) scanQR(hitQ);
+  }
+}
+
+function createRingWave(pos, maxR, color) {
+  const geo = new THREE.SphereGeometry(0.12, 16, 10);
+  const mat = new THREE.MeshBasicMaterial({color, transparent:true, opacity:0.82, wireframe:true});
+  const m = new THREE.Mesh(geo, mat);
+  m.position.copy(pos);
+  scene.add(m);
+  ringWaves.push({mesh:m, mat, r:0.12, maxR, alive:true});
+}
+
+// ═══════════════════════════════════════════════
+//  QR SCAN
+// ═══════════════════════════════════════════════
+function scanQR(qObj) {
+  const w = qObj.w;
+
+  // Scan animation
+  let scanT=0;
+  const scanLine = new THREE.Mesh(
+    new THREE.PlaneGeometry(1.4,0.04),
+    new THREE.MeshBasicMaterial({color:0x00ff88,transparent:true,opacity:0.9})
+  );
+  scanLine.position.set(0,-0.65,0.05);
+  qObj.g.children[1].add(scanLine);
+  const si=setInterval(()=>{
+    scanT+=0.05;
+    scanLine.position.y=-0.65+scanT*1.3;
+    if(scanT>=1){clearInterval(si);qObj.g.children[1].remove(scanLine);}
+  },20);
+
+  // Fill popup with product info
+  document.getElementById('ip-title').textContent = w.fullName;
+  document.getElementById('prod-desc').textContent = w.desc;
+  const specEl = document.getElementById('prod-specs');
+  specEl.innerHTML = '';
+  w.specs.forEach(s => { const li = document.createElement('li'); li.textContent = s; specEl.appendChild(li); });
+  document.getElementById('prod-effect').textContent = w.effectDesc;
+  document.getElementById('prod-visit-btn').onclick = () => window.open(w.url, '_blank');
+
+  document.getElementById('info-panel').style.display = 'block';
+  infoOpen = true;
+  if(document.pointerLockElement) document.exitPointerLock();
+
+  if(!qObj.scanned){
+    qObj.scanned=true;
+    addScore(50);
+    addKillFeed('QR SCANNED: '+w.name+' +50pts!');
+  }
+}
+
+function closeInfo() {
+  document.getElementById('info-panel').style.display = 'none';
+  infoOpen = false;
+}
+
+// ═══════════════════════════════════════════════
+//  SCORE / UI
+// ═══════════════════════════════════════════════
+function addScore(pts) {
+  score += pts;
+  document.getElementById('score-value').textContent = score;
+  document.getElementById('progress-fill').style.width = Math.min(100,score/WIN_SCORE*100)+'%';
+  if(score>=WIN_SCORE && !milestoneShown) { milestoneShown=true; setTimeout(showMilestone,600); }
+}
+
+function showMilestone() {
+  if(document.pointerLockElement) document.exitPointerLock();
+  document.getElementById('milestone-popup').style.display = 'block';
+}
+
+function showReward() {
+  document.getElementById('final-score-val').textContent = score;
+  document.getElementById('reward-screen').style.display='flex';
+  if(document.pointerLockElement) document.exitPointerLock();
+  const frame = document.getElementById('zebra-products-frame');
+  if (frame) frame.src = 'https://www.zebra.com/us/en/products.html';
+  setTimeout(() => window.open('https://www.zebra.com/us/en/products.html', '_blank'), 800);
+}
+
+
+function showPrompt(txt, ms) {
+  const p=document.getElementById('prompt');
+  p.textContent=txt; p.style.display='block';
+  if(promptTimer) clearTimeout(promptTimer);
+  promptTimer=setTimeout(()=>p.style.display='none',ms);
+}
+
+function flashScreen(color, alpha) {
+  const el=document.getElementById('effect-flash');
+  el.style.background='#'+color.toString(16).padStart(6,'0');
+  el.style.opacity=alpha;
+  setTimeout(()=>el.style.opacity=0,90);
+}
+
+function addKillFeed(txt) {
+  const feed=document.getElementById('kill-feed');
+  const div=document.createElement('div');
+  div.className='kill-msg'; div.textContent=txt;
+  feed.appendChild(div);
+  setTimeout(()=>{ div.remove(); },2100);
+}
+
+function showFloatingScore(pts) {
+  // Show brief message near center
+  addKillFeed('+'+pts+(pts>=25?' PRECISION!':''));
+}
+
+// ═══════════════════════════════════════════════
+//  GAME LOOP
+// ═══════════════════════════════════════════════
+function animate() {
+  requestAnimationFrame(animate);
+  const delta = clock.getDelta();
+  const t = clock.getElapsedTime();
+
+  // Camera rotation
+  camera.rotation.order='YXZ';
+  camera.rotation.y=yaw;
+  camera.rotation.x=pitch;
+
+  // Player move
+  if(isLocked && gameActive) movePlayer(delta);
+
+  // Auto-fire for rapid weapon
+  if(mouseDown && gameActive && !infoOpen && currentWeapon>=0 && WEAPONS[currentWeapon].effect==='rapid') {
+    shoot();
+  }
+
+  // Weapon bob
+  weaponObjs.forEach(o=>{
+    if(o.collected) return;
+    o.mesh.position.y = 0.45+Math.sin(t*1.6+o.bob)*0.1;
+    o.mesh.rotation.y += 0.018;
+    o.pl.intensity = 0.6+Math.sin(t*2.5+o.bob)*0.35;
+    if(camera.position.distanceTo(o.mesh.position)<2.6) showPrompt('Press E — pick up '+o.w.name,80);
+  });
+
+  // Balloon animation
+  balloons.forEach(b=>{
+    if(!b.alive) return;
+    b.mesh.position.y += Math.sin(t*b.spd+b.bob)*0.003;
+    b.mesh.position.x += Math.cos(t*0.18+b.da)*0.003;
+    b.mesh.position.z += Math.sin(t*0.18+b.da)*0.003;
+    const d=Math.sqrt(b.mesh.position.x**2+b.mesh.position.z**2);
+    if(d>21){b.mesh.position.x*=0.99;b.mesh.position.z*=0.99;}
+    // Keep the barcode tag on the camera-facing side, turned toward the player
+    const tag = b.mesh.userData.tag;
+    if (tag) {
+      const dir = new THREE.Vector3().subVectors(camera.position, b.mesh.position).normalize();
+      tag.position.set(dir.x*0.44, 0.05+dir.y*0.44, dir.z*0.44);
+      tag.lookAt(camera.position);
+    }
+  });
+
+  // Scan reticle markers — constant on-screen size, fade + pop, always face the player
+  for (let i=scanMarkers.length-1;i>=0;i--){
+    const s=scanMarkers[i];
+    s.life -= delta*1.1;                       // ~0.9s lifetime
+    if (s.life<=0){ scene.remove(s.mesh); scanMarkers.splice(i,1); continue; }
+    s.mat.opacity = Math.min(1, s.life*2.2);
+    // Scale by distance so it's the same readable size no matter how far the balloon was
+    const dist = s.mesh.position.distanceTo(camera.position);
+    s.mesh.scale.setScalar(dist*0.11 * (1.0 + (1-s.life)*0.35));
+    s.mesh.lookAt(camera.position);
+  }
+
+  // Projectiles
+  for(let i=projectiles.length-1;i>=0;i--){
+    const p=projectiles[i];
+    if(!p.alive){projectiles.splice(i,1);continue;}
+    p.mesh.position.addScaledVector(p.dir,p.speed);
+    p.dist+=p.speed;
+
+    // Hit balloons
+    balloons.forEach(b=>{
+      if(!b.alive||!p.alive) return;
+      if(p.mesh.position.distanceTo(b.mesh.position)<0.55){
+        if(p.isCryo){ explodeCryo(p.mesh.position.clone(),p.w); }
+        else{ popBalloon(b,p.w); addScore(p.w.pts); }
+        p.alive=false; scene.remove(p.mesh);
+      }
+    });
+
+    // Hit QR codes
+    qrObjs.forEach(q=>{
+      if(!p.alive) return;
+      if(p.mesh.position.distanceTo(q.g.position)<1.8){ scanQR(q); p.alive=false; scene.remove(p.mesh); }
+    });
+
+    // Boundary
+    const op = camera.position.distanceTo(p.mesh.position);
+    if(p.dist>45||!p.alive){
+      if(p.alive) scene.remove(p.mesh);
+      projectiles.splice(i,1);
+    }
+  }
+
+  // Particles
+  for(let i=particles.length-1;i>=0;i--){
+    const p=particles[i];
+    p.mesh.position.add(p.vel);
+    p.vel.y-=0.006;
+    p.life-=0.035;
+    p.mat.opacity=Math.max(0,p.life);
+    if(p.life<=0){scene.remove(p.mesh);particles.splice(i,1);}
+  }
+
+  // Ring waves
+  for(let i=ringWaves.length-1;i>=0;i--){
+    const r=ringWaves[i];
+    r.r+=0.22;
+    r.mesh.scale.setScalar(r.r/0.12);
+    r.mat.opacity=Math.max(0,0.82*(1-r.r/r.maxR));
+    if(r.r>=r.maxR){scene.remove(r.mesh);ringWaves.splice(i,1);}
+  }
+
+  // Held weapon sway
+  if(heldMesh){
+    heldMesh.rotation.z=Math.sin(t*2.2)*0.018;
+    heldMesh.position.y=-0.36+Math.sin(t*3)*0.005;
+  }
+
+  renderer.render(scene,camera);
+}
+
+function movePlayer(delta) {
+  const spd = 5 * delta;
+  const fwd = new THREE.Vector3(-Math.sin(yaw),0,-Math.cos(yaw));
+  const right= new THREE.Vector3(Math.cos(yaw),0,-Math.sin(yaw));
+  const mv = new THREE.Vector3();
+
+  if(keys['KeyW']||keys['ArrowUp'])    mv.add(fwd);
+  if(keys['KeyS']||keys['ArrowDown'])  mv.sub(fwd);
+  if(keys['KeyA']||keys['ArrowLeft'])  mv.sub(right);
+  if(keys['KeyD']||keys['ArrowRight']) mv.add(right);
+
+  if(mv.length()>0){
+    mv.normalize().multiplyScalar(spd);
+    const np=camera.position.clone().add(mv);
+    if(Math.sqrt(np.x**2+np.z**2)<21) camera.position.add(mv);
+  }
+  camera.position.y=PLAYER_H;
+}
+</script>
+</body>
+</html>

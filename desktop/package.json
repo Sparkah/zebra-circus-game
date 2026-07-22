@@ -1,0 +1,12 @@
+{
+  "name": "zebra-circus-blaster-desktop",
+  "version": "1.0.0",
+  "description": "Zebra Circus Blaster desktop wrapper (Electron)",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron ."
+  },
+  "devDependencies": {
+    "electron": "^33.0.0"
+  }
+}

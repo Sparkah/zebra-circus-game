@@ -1,0 +1,163 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 420 365">
+<defs>
+  <radialGradient id="gB" cx="30%" cy="22%" r="72%">
+    <stop offset="0%"   stop-color="#FCFAF0"/>
+    <stop offset="45%"  stop-color="#EBE3C8"/>
+    <stop offset="100%" stop-color="#A89E6E"/>
+  </radialGradient>
+  <radialGradient id="gH" cx="34%" cy="26%" r="68%">
+    <stop offset="0%"   stop-color="#FCFAF0"/>
+    <stop offset="45%"  stop-color="#EBE3C8"/>
+    <stop offset="100%" stop-color="#A89E6E"/>
+  </radialGradient>
+  <radialGradient id="gSn" cx="50%" cy="35%" r="64%">
+    <stop offset="0%"   stop-color="#F8ECD0"/>
+    <stop offset="100%" stop-color="#D0B870"/>
+  </radialGradient>
+  <radialGradient id="gEye" cx="30%" cy="26%" r="70%">
+    <stop offset="0%"   stop-color="#5A3A12"/>
+    <stop offset="55%"  stop-color="#2A1605"/>
+    <stop offset="100%" stop-color="#040100"/>
+  </radialGradient>
+  <radialGradient id="gLeg" cx="30%" cy="20%" r="72%">
+    <stop offset="0%"   stop-color="#F5F0E0"/>
+    <stop offset="100%" stop-color="#B2A67A"/>
+  </radialGradient>
+
+  <filter id="fSh" x="-25%" y="-25%" width="150%" height="150%">
+    <feDropShadow dx="4" dy="9" stdDeviation="13" flood-color="#0a0800" flood-opacity="0.30"/>
+  </filter>
+  <filter id="fFz" x="-5%" y="-5%" width="110%" height="110%">
+    <feTurbulence type="fractalNoise" baseFrequency="0.70" numOctaves="3" seed="19" result="n"/>
+    <feDisplacementMap in="SourceGraphic" in2="n" scale="2.5" xChannelSelector="R" yChannelSelector="G"/>
+  </filter>
+
+  <clipPath id="cBd">
+    <ellipse cx="228" cy="228" rx="122" ry="70"/>
+  </clipPath>
+  <clipPath id="cHd">
+    <circle cx="90" cy="138" r="73"/>
+  </clipPath>
+  <clipPath id="cNk">
+    <path d="M108 170 C112 144 130 130 152 132 C168 138 176 158 168 202 Z"/>
+  </clipPath>
+</defs>
+
+<!-- GROUND SHADOW -->
+<ellipse cx="230" cy="358" rx="148" ry="11" fill="#0a0800" opacity="0.18"/>
+
+<!-- TAIL -->
+<path d="M348 172 C372 150 388 166 382 192 C376 212 360 216 350 202"
+      stroke="#1C1C1C" stroke-width="13" fill="none" stroke-linecap="round" filter="url(#fFz)"/>
+<ellipse cx="349" cy="204" rx="15" ry="19" fill="#1C1C1C" transform="rotate(20,349,204)" filter="url(#fFz)"/>
+<ellipse cx="347" cy="198" rx="6"  ry="8"  fill="#EBE3C8" opacity="0.36" transform="rotate(20,347,198)"/>
+
+<!-- BACK LEGS (drawn behind body) -->
+<g filter="url(#fFz)">
+  <rect x="282" y="282" width="28" height="62" rx="14" fill="url(#gLeg)"/>
+  <rect x="282" y="295" width="28" height="12" rx="3" fill="#1C1C1C"/>
+  <rect x="280" y="332" width="32" height="14" rx="8" fill="#1C1C1C"/>
+  <ellipse cx="295" cy="334" rx="10" ry="3" fill="white" opacity="0.12"/>
+  <rect x="313" y="284" width="28" height="60" rx="14" fill="url(#gLeg)"/>
+  <rect x="313" y="297" width="28" height="12" rx="3" fill="#1C1C1C"/>
+  <rect x="311" y="332" width="32" height="13" rx="7" fill="#1C1C1C"/>
+</g>
+
+<!-- BODY -->
+<ellipse cx="228" cy="228" rx="122" ry="70" fill="url(#gB)" filter="url(#fSh)"/>
+
+<!-- Body stripes — vertical bands clipped to body ellipse -->
+<g clip-path="url(#cBd)" filter="url(#fFz)">
+  <rect x="112" y="152" width="16" height="155" rx="5" fill="#1C1C1C"/>
+  <rect x="136" y="150" width="17" height="158" rx="5" fill="#1C1C1C"/>
+  <rect x="162" y="149" width="17" height="160" rx="5" fill="#1C1C1C"/>
+  <rect x="189" y="148" width="17" height="162" rx="5" fill="#1C1C1C"/>
+  <rect x="216" y="149" width="17" height="160" rx="5" fill="#1C1C1C"/>
+  <rect x="243" y="150" width="17" height="158" rx="5" fill="#1C1C1C"/>
+  <rect x="269" y="153" width="16" height="152" rx="5" fill="#1C1C1C"/>
+  <rect x="293" y="160" width="15" height="142" rx="5" fill="#1C1C1C"/>
+  <!-- belly band -->
+  <path d="M144 268 C162 258 294 258 312 268 C312 290 294 300 228 300 C162 300 144 290 144 268Z" fill="#1C1C1C"/>
+</g>
+<!-- Body sheen -->
+<ellipse cx="155" cy="182" rx="52" ry="26" fill="white" opacity="0.07" transform="rotate(-10,155,182)"/>
+
+<!-- FRONT LEGS -->
+<g filter="url(#fFz)">
+  <rect x="136" y="282" width="28" height="62" rx="14" fill="url(#gLeg)"/>
+  <rect x="136" y="295" width="28" height="12" rx="3" fill="#1C1C1C"/>
+  <rect x="134" y="332" width="32" height="14" rx="8" fill="#1C1C1C"/>
+  <ellipse cx="148" cy="334" rx="10" ry="3" fill="white" opacity="0.12"/>
+  <rect x="167" y="284" width="28" height="60" rx="14" fill="url(#gLeg)"/>
+  <rect x="167" y="297" width="28" height="12" rx="3" fill="#1C1C1C"/>
+  <rect x="165" y="332" width="32" height="13" rx="7" fill="#1C1C1C"/>
+</g>
+
+<!-- NECK -->
+<path d="M108 170 C112 144 130 130 152 132 C168 138 176 158 168 202 Z" fill="url(#gB)"/>
+<!-- Neck stripes -->
+<g clip-path="url(#cNk)" filter="url(#fFz)">
+  <rect x="116" y="125" width="14" height="85" rx="4" fill="#1C1C1C"/>
+  <rect x="138" y="122" width="14" height="88" rx="4" fill="#1C1C1C"/>
+  <rect x="159" y="128" width="13" height="78" rx="4" fill="#1C1C1C"/>
+</g>
+
+<!-- MANE (bumps along top of neck to back of head) -->
+<g filter="url(#fFz)">
+  <circle cx="167" cy="116" r="12" fill="#1C1C1C"/>
+  <circle cx="153" cy="104" r="13" fill="#1C1C1C"/>
+  <circle cx="136" cy="96"  r="14" fill="#1C1C1C"/>
+  <circle cx="118" cy="93"  r="14" fill="#1C1C1C"/>
+  <circle cx="100" cy="95"  r="13" fill="#1C1C1C"/>
+  <circle cx="83"  cy="101" r="12" fill="#1C1C1C"/>
+  <circle cx="70"  cy="110" r="11" fill="#1C1C1C"/>
+  <!-- Sheen on mane tips -->
+  <circle cx="136" cy="93"  r="5"  fill="white" opacity="0.16"/>
+  <circle cx="100" cy="92"  r="5"  fill="white" opacity="0.15"/>
+</g>
+
+<!-- EAR -->
+<g filter="url(#fFz)">
+  <ellipse cx="74" cy="78" rx="20" ry="33" fill="url(#gH)" transform="rotate(-16,74,78)"/>
+  <ellipse cx="74" cy="78" rx="10" ry="19" fill="#F5B5A5"  transform="rotate(-16,74,78)"/>
+  <ellipse cx="74" cy="67" rx="6"  ry="12" fill="#1C1C1C" opacity="0.58" transform="rotate(-16,74,67)"/>
+</g>
+
+<!-- HEAD -->
+<circle cx="90" cy="138" r="73" fill="url(#gH)" filter="url(#fFz)"/>
+
+<!-- Head stripes -->
+<g clip-path="url(#cHd)" filter="url(#fFz)">
+  <path d="M18  128 C24 106 42 105 42 128 C42 150 24 152 18 140Z"   fill="#1C1C1C"/>
+  <path d="M40  108 C47 86  66 87  65 110 C64 132 46 133 40 122Z"   fill="#1C1C1C"/>
+  <path d="M67  100 C75 78  94 80  92 103 C91 125 73 126 67 115Z"   fill="#1C1C1C"/>
+  <path d="M95  100 C103 79 120 81 118 104 C116 126 100 127 95 116Z" fill="#1C1C1C"/>
+  <path d="M120 108 C128 89 143 91 141 113 C139 133 125 133 120 123Z" fill="#1C1C1C"/>
+  <path d="M140 123 C147 106 158 109 155 128 C153 145 142 145 140 135Z" fill="#1C1C1C"/>
+</g>
+<!-- Head sheen -->
+<ellipse cx="60" cy="106" rx="30" ry="16" fill="white" opacity="0.08" transform="rotate(-15,60,106)"/>
+
+<!-- SNOUT -->
+<ellipse cx="38" cy="165" rx="36" ry="28" fill="url(#gSn)"/>
+<ellipse cx="28" cy="154" rx="15" ry="10" fill="white" opacity="0.14" transform="rotate(-12,28,154)"/>
+<!-- Nostril -->
+<ellipse cx="18" cy="172" rx="8" ry="6"   fill="#BFA055" transform="rotate(-12,18,172)"/>
+<ellipse cx="16" cy="170" rx="2.8" ry="2" fill="white" opacity="0.50" transform="rotate(-12,16,170)"/>
+<!-- Mouth -->
+<path d="M14 181 Q28 189 44 183" stroke="#A08038" stroke-width="3" fill="none" stroke-linecap="round"/>
+
+<!-- EYE -->
+<ellipse cx="73" cy="136" rx="23" ry="21" fill="white"/>
+<circle  cx="74" cy="137" r="16"  fill="url(#gEye)"/>
+<circle  cx="75" cy="138" r="9"   fill="#040100"/>
+<circle  cx="67" cy="130" r="7"   fill="white" opacity="0.93"/>
+<circle  cx="78" cy="145" r="3.5" fill="white" opacity="0.40"/>
+<!-- Eyelid -->
+<path d="M50 129 Q73 115 96 129" stroke="#1C1C1C" stroke-width="4" fill="none" stroke-linecap="round"/>
+<!-- Lashes -->
+<line x1="53"  y1="127" x2="48"  y2="117" stroke="#1C1C1C" stroke-width="2.4" stroke-linecap="round"/>
+<line x1="64"  y1="119" x2="61"  y2="109" stroke="#1C1C1C" stroke-width="2.4" stroke-linecap="round"/>
+<line x1="76"  y1="117" x2="75"  y2="107" stroke="#1C1C1C" stroke-width="2.4" stroke-linecap="round"/>
+<line x1="88"  y1="120" x2="90"  y2="111" stroke="#1C1C1C" stroke-width="2.4" stroke-linecap="round"/>
+</svg>
