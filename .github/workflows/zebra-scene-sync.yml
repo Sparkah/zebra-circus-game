@@ -147,6 +147,7 @@ jobs:
           COMMIT_SHA: ${{ steps.publish.outputs.commit_sha || steps.prepare.outputs.commit_sha }}
           COMPACT_SHA: ${{ steps.claim.outputs.compact_sha }}
           COMPLETE_FILE: ${{ runner.temp }}/zebra-sync/complete.json
+          EXPECTED_HEAD: ${{ steps.claim.outputs.expected_head }}
           LEASE_ID: ${{ steps.claim.outputs.lease_id }}
           REQUEST_ID: ${{ steps.claim.outputs.request_id }}
           SYNC_SECRET: ${{ secrets.ZEBRA_SYNC_SECRET }}
@@ -154,13 +155,34 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          commit_parent_sha="$(git -C target rev-parse "${COMMIT_SHA}^")"
+          changed_paths="$(git -C target diff-tree --no-commit-id --name-only -r "$COMMIT_SHA")"
+          remote_head_sha="$(git -C target ls-remote origin refs/heads/agent/game-port-studio-integration | cut -f1)"
+          [ "$commit_parent_sha" = "$EXPECTED_HEAD" ]
+          [ "$changed_paths" = "zebra-circus.scene.json" ]
+          [ "$remote_head_sha" = "$COMMIT_SHA" ]
+          export COMMIT_PARENT_SHA="$commit_parent_sha" REMOTE_HEAD_SHA="$remote_head_sha"
           node --input-type=module -e '
             import crypto from "node:crypto";
             import fs from "node:fs";
             const bytes = fs.readFileSync("target/zebra-circus.scene.json");
             const header = Buffer.from(`blob ${bytes.length}\0`);
             const gitBlobSha = crypto.createHash("sha1").update(header).update(bytes).digest("hex");
-            fs.writeFileSync(process.env.COMPLETE_FILE, JSON.stringify({ status: "complete", requestId: process.env.REQUEST_ID, leaseId: process.env.LEASE_ID, commitSha: process.env.COMMIT_SHA, compactSha256: process.env.COMPACT_SHA, gitBlobSha }));
+            fs.writeFileSync(process.env.COMPLETE_FILE, JSON.stringify({
+              status: "complete",
+              requestId: process.env.REQUEST_ID,
+              leaseId: process.env.LEASE_ID,
+              commitSha: process.env.COMMIT_SHA,
+              compactSha256: process.env.COMPACT_SHA,
+              gitBlobSha,
+              expectedGitHead: process.env.EXPECTED_HEAD,
+              commitParentSha: process.env.COMMIT_PARENT_SHA,
+              remoteHeadSha: process.env.REMOTE_HEAD_SHA,
+              repository: "Sparkah/zebra-circus-game",
+              branch: "agent/game-port-studio-integration",
+              path: "zebra-circus.scene.json",
+              changedPaths: ["zebra-circus.scene.json"]
+            }));
           '
           curl --silent --show-error --fail-with-body --retry 2 --retry-all-errors --connect-timeout 10 --max-time 90 \
             --request POST "$SYNC_URL/api/github-sync/complete" \
