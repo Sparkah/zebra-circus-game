@@ -1,12 +1,12 @@
 # Zebra scene editing
 
-`zebra-circus.scene.json` is the Game Port Studio v0.14 project for Zebra. It contains 222 stable objects, 15 Box Colliders and 72 exact GLB assets. The exact set includes four different product QR boards, 40 deterministic seated spectators, and the six original crowd models used across 28 imported spectators.
+`zebra-circus.scene.json` uses the stable `scene@0.14` document schema inside the focused Zebra editor v0.15. It contains 222 stable objects, 15 Box Colliders and 72 exact GLB assets. The exact set includes four different product QR boards, 40 deterministic seated spectators, and the six original crowd models used across 28 imported spectators.
 
-## What is exact and what is portable
+## Exact scene boundary
 
 Exact pixel/runtime parity applies to Studio's persistent original Zebra runtime only. **Edit** pauses the canonical `index.html` scene and layers authoring controls onto it; **Play Zebra** resumes the same iframe, scene, canvas and WebGL context. The parity test compares the same game-camera pixels, runtime context token and visual manifest across that transition.
 
-**Create Three.js project** and **Create Unity project** are portable scene exports, not rebuilt copies of the complete Zebra game. They carry the validated scene, exact asset bytes, stable object IDs, transforms, supported materials, hierarchy and components. Zebra's procedural balloon/weapon/scan systems, DOM HUD, scoring and other runtime-only behavior are not exported, so generated targets are not expected or claimed to match `index.html` pixel-for-pixel.
+The focused collaborator session does not render conversion, publishing, asset-library, assistant, export, or Three.js/Unity project-generation controls. It exists only to edit the current Zebra scene, save it, play it, and return the scene change to GitHub.
 
 ## Editable scope
 
@@ -23,7 +23,7 @@ Game Port Studio is a separate private repository pinned by `game-port-studio.pr
 git clone https://github.com/Sparkah/game-port-studio.git
 git clone https://github.com/Mucchun/zebra-circus-game.git
 cd game-port-studio
-git checkout v0.14.0
+git checkout v0.15.0
 npm ci
 ```
 
@@ -36,25 +36,20 @@ node tools/start-game-port-studio.mjs
 
 The launcher verifies the exact tested engine commit before starting. If the repositories are not siblings, set `GAME_PORT_STUDIO_PATH=/path/to/game-port-studio` for the launcher and Zebra tests.
 
-Open:
-
-- Standalone Zebra: http://127.0.0.1:8765/
-- Game Port Studio: http://127.0.0.1:8766/
+The launcher prints two links. **Game** is the standalone Zebra runtime. **Edit the scene** is a one-run URL containing a temporary fragment token; open that exact URL. The token moves into tab-scoped storage and disappears from the visible address.
 
 ## Load and edit Zebra
 
-1. In Studio, choose **Build a game**.
-2. Click **Open scene** and select `zebra-circus.scene.json` from this repository.
-3. Wait for **Saved on this Mac**. The project is about 14 MB, so Studio stores it in IndexedDB instead of localStorage.
-4. Confirm the viewport badge says **EDITING ORIGINAL ZEBRA RENDERER**. This is the actual paused `index.html` renderer, not a proxy SceneView.
-5. Select an object in the hierarchy or click it in the viewport. Use **Move / Rotate / Scale** or W/E/R. Right-drag orbits; the mouse wheel zooms; **C** toggles the authored game camera. Collider objects show a cyan/orange wireframe helper. Original source definitions and parent links stay identity-locked; moving an original hierarchy root still moves its children.
-6. To edit a QR, select `MC9400 QR`, `MC3400 QR`, `PS30 QR`, or `TC8300 QR`. In **Mesh Renderer**, use **QR artwork** to choose one of the four exact product QR/label assets. The original runtime graphic changes immediately; Undo restores it.
-7. Edit Box Collider centre, size, enabled state, or trigger state in the Inspector. Transform and collider edits are sent back to the scene document and participate in Undo/Redo.
-8. For a new object, use one of the supported dynamic-extra kinds listed above. Configure its inline untextured material and optional Box Collider, then transform, parent, hide/show, duplicate or delete it as needed.
-9. Click **Play Zebra**. Studio resumes the same iframe, scene, canvas and WebGL context. It does not construct another scene. Click **Stop** to freeze the same runtime back into editable authoring mode.
-10. Click **Export scene** to download the reviewed v0.14 document. Export does not overwrite the repository file automatically.
+1. The canonical `zebra-circus.scene.json` opens automatically. Wait for **Up to date** and confirm the viewport badge says **EDITING ORIGINAL ZEBRA RENDERER**. This is the actual paused `index.html` renderer, not a proxy.
+2. Select an object in **Objects** or click it in the viewport. Use **Move / Rotate / Scale** or W/E/R. Right-drag orbits; the mouse wheel zooms; **C** toggles the authored game camera. Collider objects show a cyan/orange wireframe helper. Original source definitions and parent links stay identity-locked; moving an original hierarchy root still moves its children.
+3. To edit a QR, select `MC9400 QR`, `MC3400 QR`, `PS30 QR`, or `TC8300 QR`. In **Mesh Renderer**, use **QR artwork** to choose one of the four exact product QR/label assets. The original runtime graphic changes immediately; Undo restores it.
+4. Edit Box Collider centre, size, enabled state, or trigger state in the Inspector. If an object has no collider, choose **Add component** → **Box Collider**. These edits participate in Undo/Redo.
+5. Use **+ Add object** for a supported Empty or primitive extra. Configure its inline untextured material and optional Box Collider, then transform, parent, hide/show, duplicate or delete it as needed.
+6. Click **Play Zebra**. The editor resumes the same iframe, scene, canvas and WebGL context. Click **Stop** to freeze the same runtime back into editing.
+7. Click **Save** to validate and atomically update only `zebra-circus.scene.json` in this checkout.
+8. Click **Save & Push** to review the exact repository, branch, scene file and commit message. Nothing is pushed until the confirmation button is clicked. A successful action creates the scene-only commit `Update Zebra scene from editor` and normally pushes it to `origin`.
 
-The separate **Live game** panel remains a diagnostic side-by-side bridge, but it is not needed for normal Zebra editing.
+Save & Push stops if another repository file is modified/staged/untracked, the branch is detached or not synchronized with GitHub, the remote is not `Mucchun/zebra-circus-game`, the scene changed outside the editor, or the scene/asset contract is invalid. It never force-pushes.
 
 ## Verify
 
@@ -69,6 +64,8 @@ cd ../zebra-circus-game
 GAME_PORT_STUDIO_PATH=../game-port-studio \
 node --test tests/*.test.mjs
 ```
+
+`test:zebra` also exercises the focused collaborator UI, including direct load, QR editing, Undo/Redo, Save, confirmation/cancel, Save & Push request handling, same-iframe Play/Stop, and responsive widths. The Zebra test suite verifies the launcher configuration without performing a live GitHub push.
 
 `test:zebra` fails unless the persistent original-runtime Edit and Play modes retain the same iframe/context/visual manifest and produce a byte-identical raw canvas from the same game camera. It also checks all four distinct QR textures, 40 seated plus 28 imported spectators, a real pointer gizmo drag, collider helper, QR artwork change/Undo, scan-panel X movement recovery, Stop, large-project reload and the bounded dynamic-extra contract. Separately, `test:zebra-targets` verifies portable 222-object/72-asset Three.js and Unity 6000.3.5f2 scene output; it does not assert Zebra gameplay or pixel parity.
 

@@ -24,7 +24,7 @@ python3 -m http.server 8765 --bind 127.0.0.1
 # then open http://127.0.0.1:8765/
 ```
 
-To move arena objects, edit colliders, run the actual game inside Game Port Studio, or create portable Three.js and Unity scene projects, follow [EDITOR.md](EDITOR.md).
+To move arena objects, edit colliders, change QR artwork, add simple scene objects, and save the reviewed scene back to GitHub, follow [EDITOR.md](EDITOR.md).
 
 Zebra pins the compatible private editor release in `game-port-studio.project.json`. Collaborators with engine access can keep `game-port-studio` beside this repository and run:
 
@@ -32,13 +32,13 @@ Zebra pins the compatible private editor release in `game-port-studio.project.js
 node tools/start-game-port-studio.mjs
 ```
 
-This starts the game on port 8765 and the editor on port 8766 without copying the private engine into this public repository.
+This starts the game on port 8765 and prints a one-run focused editor URL on port 8766. The collaborator lands directly in the real Zebra scene; the engine Home, conversion, publishing and project-generation UI is not rendered.
 
-## Editor and export scope
+## Focused scene editor
 
-Game Port Studio's exact Edit/Play parity is specific to its persistent original Zebra runtime: it pauses and resumes the same canonical `index.html` iframe, scene, canvas and WebGL context. Generated Three.js and Unity projects preserve the v0.14 scene, exact asset bytes, stable object identities, supported materials and components, but they do not export Zebra's full procedural gameplay or DOM HUD and are not pixel-parity builds.
+The focused editor shows only Objects, the original Zebra viewport, Inspector, scene transforms, Undo/Redo, Play/Stop, Save and Save & Push. Edit/Play parity is exact because both modes pause and resume the same canonical `index.html` iframe, scene, canvas and WebGL context.
 
-The 222 original Zebra objects keep stable IDs, fixed hierarchy, and fixed model/primitive sources. Their transforms (including hierarchy-root transforms), visibility and authored Box Colliders are editable; the only original-source exception is switching a QR among the exact MC9400, MC3400, PS30 and TC8300 artwork family. Studio can also add persistent **Empty**, **Cube**, **Sphere**, **Cylinder**, **Capsule** and **Plane** extras with an inline untextured material and optional Box Collider. Extras support transforms, parenting, visibility, duplicate and delete, but do not automatically gain Zebra scan, pickup, balloon, scoring or HUD behavior.
+The 222 original Zebra objects keep stable IDs, fixed hierarchy, and fixed model/primitive sources. Their transforms (including hierarchy-root transforms), visibility and authored Box Colliders are editable; the only original-source exception is switching a QR among the exact MC9400, MC3400, PS30 and TC8300 artwork family. The editor can also add persistent **Empty**, **Cube**, **Sphere**, **Cylinder**, **Capsule** and **Plane** extras with an inline untextured material and optional Box Collider. Extras support transforms, parenting, visibility, duplicate and delete, but do not automatically gain Zebra scan, pickup, balloon, scoring or HUD behavior.
 
 ## Install as an app (PWA)
 The game ships a web-app manifest + service worker, so it's installable:

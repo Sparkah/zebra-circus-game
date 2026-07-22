@@ -3,8 +3,8 @@
   "engine": {
     "repository": "https://github.com/Sparkah/game-port-studio",
     "visibility": "private",
-    "version": "0.14.0",
-    "testedCommit": "99c4561866df94b57eed314d7b2b2cee6254e254"
+    "version": "0.15.0",
+    "testedCommit": "d2f89fe26b2c63c4259e53809407dfe886dc54c5"
   },
   "adapter": "zebra-runtime",
   "scene": "zebra-circus.scene.json",
@@ -16,5 +16,11 @@
   "studio": {
     "host": "127.0.0.1",
     "port": 8766
+  },
+  "collaboration": {
+    "mode": "focused-scene",
+    "repository": "Mucchun/zebra-circus-game",
+    "remote": "origin",
+    "commitMessage": "Update Zebra scene from editor"
   }
 }
