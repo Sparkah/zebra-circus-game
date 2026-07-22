@@ -1,5 +1,11 @@
 Original prompt: Fix the scan close movement bug, add a physical level builder with colliders, and open the game through the experimental Three.js/Unity Game Port Studio for editing.
 
+## 2026-07-22 — v0.16 hosted real-time scene collaboration
+
+- Added a private hosted entry at `zebra-scene-editor.timofeymarkin98.workers.dev`. It opens only the focused exact-runtime scene editor; no conversion, platform, publishing or project-generation UI is exposed.
+- Two signed-in collaborators share semantic scene edits, presence, conflict handling, Undo/Redo and online Save checkpoints. Queue GitHub returns a validated checkpoint through a scheduled fork workflow that can normally change only `zebra-circus.scene.json` on the existing review branch.
+- The public game remains independent of the private engine checkout. Local authoring remains available through the pinned v0.16.0 tag, while the hosted route needs only the separately shared access code.
+
 ## 2026-07-22 — current parity, source-lock and dynamic-extra contract
 
 - Exact visual/runtime parity applies only to the persistent original Zebra `index.html` Edit/Play path. It retains one iframe, scene, canvas and WebGL context and compares byte-identical game-camera pixels. Generated Three.js/Unity outputs are portability builds for the scene, exact asset bytes, stable IDs, supported materials and components; they do not contain the complete Zebra gameplay/HUD and do not claim pixel parity.

@@ -1,12 +1,24 @@
 # Zebra scene editing
 
-`zebra-circus.scene.json` uses the stable `scene@0.14` document schema inside the focused Zebra editor v0.15. It contains 222 stable objects, 15 Box Colliders and 72 exact GLB assets. The exact set includes four different product QR boards, 40 deterministic seated spectators, and the six original crowd models used across 28 imported spectators.
+`zebra-circus.scene.json` uses the stable `scene@0.14` document schema inside the focused Zebra editor v0.16. It contains 222 stable objects, 15 Box Colliders and 72 exact GLB assets. The exact set includes four different product QR boards, 40 deterministic seated spectators, and the six original crowd models used across 28 imported spectators.
 
 ## Exact scene boundary
 
 Exact pixel/runtime parity applies to Studio's persistent original Zebra runtime only. **Edit** pauses the canonical `index.html` scene and layers authoring controls onto it; **Play Zebra** resumes the same iframe, scene, canvas and WebGL context. The parity test compares the same game-camera pixels, runtime context token and visual manifest across that transition.
 
 The focused collaborator session does not render conversion, publishing, asset-library, assistant, export, or Three.js/Unity project-generation controls. It exists only to edit the current Zebra scene, save it, play it, and return the scene change to GitHub.
+
+## Edit online in real time
+
+Open [zebra-scene-editor.timofeymarkin98.workers.dev](https://zebra-scene-editor.timofeymarkin98.workers.dev). Enter your name and the access code Tim shares privately, then wait for **Live**. No engine checkout or local setup is required.
+
+1. Select an object in **Objects** or in the exact runtime viewport and edit it with the Inspector, Move/Rotate/Scale, W/E/R or the supported Add object/component controls.
+2. Other signed-in editors appear beside the Live status. Different fields merge; a same-field race keeps the first confirmed value and asks the other editor to retry.
+3. Click **Save** to create an online checkpoint of the confirmed shared revision.
+4. Click **Queue GitHub**, review the fixed target and confirm. The browser does not receive GitHub credentials or push directly.
+5. The fork workflow validates the checkpoint and normally pushes only `zebra-circus.scene.json` to `Sparkah:agent/game-port-studio-integration`. Review progress in [pull request 1](https://github.com/Mucchun/zebra-circus-game/pull/1).
+
+Treat the access code as a password. Do not place it in this repository, an issue or a screenshot. Sessions expire after seven days.
 
 ## Editable scope
 
@@ -23,7 +35,7 @@ Game Port Studio is a separate private repository pinned by `game-port-studio.pr
 git clone https://github.com/Sparkah/game-port-studio.git
 git clone https://github.com/Mucchun/zebra-circus-game.git
 cd game-port-studio
-git checkout v0.15.0
+git checkout v0.16.0
 npm ci
 ```
 
@@ -38,7 +50,7 @@ The launcher verifies the exact tested engine commit before starting. If the rep
 
 The launcher prints two links. **Game** is the standalone Zebra runtime. **Edit the scene** is a one-run URL containing a temporary fragment token; open that exact URL. The token moves into tab-scoped storage and disappears from the visible address.
 
-## Load and edit Zebra
+## Load and edit Zebra locally
 
 1. The canonical `zebra-circus.scene.json` opens automatically. Wait for **Up to date** and confirm the viewport badge says **EDITING ORIGINAL ZEBRA RENDERER**. This is the actual paused `index.html` renderer, not a proxy.
 2. Select an object in **Objects** or click it in the viewport. Use **Move / Rotate / Scale** or W/E/R. Right-drag orbits; the mouse wheel zooms; **C** toggles the authored game camera. Collider objects show a cyan/orange wireframe helper. Original source definitions and parent links stay identity-locked; moving an original hierarchy root still moves its children.
