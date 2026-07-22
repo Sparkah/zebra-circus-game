@@ -1,6 +1,14 @@
 Original prompt: Fix the scan close movement bug, add a physical level builder with colliders, and open the game through the experimental Three.js/Unity Game Port Studio for editing.
 
-Latest prompt: Let Mucchun connect her AI to the hosted editor, make Command-Z undo the previous action, and add Unity-style Option + mouse-drag scene orbit.
+Latest prompt: Add Option/Alt + Command/Ctrl physical camera movement and let original mesh-bearing objects replace their visual mesh without changing stable identity.
+
+## 2026-07-22 — replaceable visuals and physical camera pan
+
+- Option/Alt + primary drag still orbits; adding Command/Ctrl when the drag begins translates the orbit camera and target together. The gesture is latched before gizmo/selection picking and changes no scene, selection, collaboration revision or Undo/Redo entry.
+- The original runtime now separates its 222 stable editable targets from their visual bindings. Each of the 204 mesh-bearing originals may select another allowlisted project GLB while keeping the same target object, parent, transform, collider, gameplay role and component identity. No automatic fit or collider resize is applied.
+- Replacement assets load only from the code-owned 72-file same-origin allowlist. Async swaps are revision/generation guarded, preview acknowledgement waits for the requested visual, and Undo/Redo or a fresh saved reload cannot be overwritten by a late model load.
+- The focused asset pack remains immutable and newly added objects remain Empty/five-primitive only. Arbitrary URLs, uploaded replacement bytes and asset deletion remain unavailable.
+- AI can list bounded mesh metadata and perform a source-only mesh replacement through the scoped live-room MCP connection; GitHub queue/push remains human-only.
 
 ## 2026-07-22 — v0.17 AI-ready authoring controls
 
@@ -15,10 +23,10 @@ Latest prompt: Let Mucchun connect her AI to the hosted editor, make Command-Z u
 - Two signed-in collaborators share semantic scene edits, presence, conflict handling, Undo/Redo and online Save checkpoints. Queue GitHub returns a validated checkpoint through a scheduled fork workflow that can normally change only `zebra-circus.scene.json` on the existing review branch.
 - The public game remains independent of the private engine checkout. Local authoring remains available through the pinned v0.16.0 tag, while the hosted route needs only the separately shared access code.
 
-## 2026-07-22 — current parity, source-lock and dynamic-extra contract
+## 2026-07-22 — superseded source-lock and current dynamic-extra contract
 
 - Exact visual/runtime parity applies only to the persistent original Zebra `index.html` Edit/Play path. It retains one iframe, scene, canvas and WebGL context and compares byte-identical game-camera pixels. Generated Three.js/Unity outputs are portability builds for the scene, exact asset bytes, stable IDs, supported materials and components; they do not contain the complete Zebra gameplay/HUD and do not claim pixel parity.
-- All 222 required original objects retain stable runtime IDs, fixed parent links, and fixed source definitions. Their transforms (including hierarchy-root transforms), visibility and authored Box Collider values remain editable, but required originals cannot be reparented, deleted, duplicated as replacements or redirected to arbitrary sources. The only original-source exception is the four QR objects, whose artwork may switch within the exact MC9400/MC3400/PS30/TC8300 family.
+- At this milestone all 222 required original objects retained stable runtime IDs, fixed parent links and fixed source definitions. The v0.18 work above supersedes only that source restriction: the stable runtime target remains protected, while its Mesh Renderer may now select another checked-in Zebra GLB. Required originals still cannot be reparented, deleted, duplicated as replacements or redirected to arbitrary URLs.
 - Supported persistent extras are Empty, Cube, Sphere, Cylinder, Capsule and Plane. Extras accept an inline untextured material and optional Box Collider and support transforms, parenting, visibility, duplicate and delete. They render through the same persistent Zebra Edit/Play runtime and export to portable targets, but do not acquire Zebra-specific scan/pickup/balloon/scoring/HUD behavior automatically.
 - The former 23-object proxy and 24-asset SceneView milestones below are historical and superseded. They are preserved to explain the correction, not as current parity or asset-count claims.
 
@@ -79,7 +87,7 @@ Latest prompt: Let Mucchun connect her AI to the hosted editor, make Command-Z u
 ## Intentional boundaries
 
 - Balloon spawn locations, all 68 spectator placements, every bleacher part, 60 flags, trapeze parts, tent shell/details, and six lights are individually authored. Balloon bob/pop/respawn state, projectiles, particles, scan VFX, held-weapon presentation, scoring, and the DOM HUD remain runtime-only transient systems.
-- The 222 originals are source-locked required runtime bindings, except for QR artwork changes within the exact four-product family. Supported dynamic extras are the bounded Empty/five-primitive, inline-untextured-material and optional-Box-Collider corridor described above; they do not implicitly become Zebra gameplay entities.
+- The 222 originals are stable required runtime bindings. Their mesh-bearing members may replace only the renderer visual source; object identity, parent, component identity and gameplay role remain protected. Supported dynamic extras are the bounded Empty/five-primitive, inline-untextured-material and optional-Box-Collider corridor described above; they do not implicitly become Zebra gameplay entities.
 - Generated Three.js and Unity projects are scene portability outputs. They intentionally omit Zebra's complete procedural runtime and therefore have no pixel-parity guarantee.
 - Zebra collision is a focused first-person static-obstacle solver, not a rigid-body physics engine. The shared scene still exports standard Box Collider data for the generated engines.
 - Live preview is intentionally limited to same-origin or loopback-hosted local Studio sessions. Persisting an edit still requires exporting/saving `zebra-circus.scene.json`.

@@ -1,5 +1,5 @@
 // Zebra Circus Blaster — service worker (offline + installability)
-const CACHE = 'zcb-v3-exact-runtime-authoring';
+const CACHE = 'zcb-v4-replaceable-runtime-visuals';
 const CORE = [
   './',
   './index.html',

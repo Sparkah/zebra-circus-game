@@ -1,6 +1,6 @@
 # Zebra scene editing
 
-`zebra-circus.scene.json` uses the stable `scene@0.14` document schema inside the focused Zebra editor v0.17. It contains 222 stable objects, 15 Box Colliders and 72 exact GLB assets. The exact set includes four different product QR boards, 40 deterministic seated spectators, and the six original crowd models used across 28 imported spectators.
+`zebra-circus.scene.json` uses the stable `scene@0.14` document schema inside the focused Zebra editor v0.18. It contains 222 stable objects, 15 Box Colliders and 72 exact GLB assets. The exact set includes four different product QR boards, 40 deterministic seated spectators, and the six original crowd models used across 28 imported spectators.
 
 ## Exact scene boundary
 
@@ -23,7 +23,7 @@ Treat the access code as a password. Do not place it in this repository, an issu
 ### Controls that match the desktop editor
 
 - Command-Z undoes the current editor's last confirmed operation; Command-Shift-Z redoes it. Both work after the original Zebra canvas has keyboard focus.
-- Hold Option and drag with the primary mouse button to orbit. Alt is the equivalent on non-Mac keyboards. The gesture switches Game camera to Orbit camera without selecting or moving an object and without adding an Undo entry.
+- Hold Option and drag with the primary mouse button to orbit. Alt is the equivalent on non-Mac keyboards. Add Command (Ctrl on non-Mac keyboards) when starting the drag to physically translate the camera and orbit target. Both gestures switch Game camera to Orbit camera without selecting or moving an object and without adding an Undo entry.
 - W, E and R choose Move, Rotate and Scale. Inspector and gizmo changes share the same history.
 
 ### Connect Mucchun's AI
@@ -43,14 +43,14 @@ Treat the access code as a password. Do not place it in this repository, an issu
 }
 ```
 
-Reconnect the AI client and have it call `zebra_scene_status` first. It can search and read objects, apply exact-revision semantic edits, review recent changes, undo edits made by that exact connection, and save an online checkpoint. It cannot queue or push GitHub. Direct Streamable HTTP is an advanced option only for clients that let the user set a manual Authorization Bearer header; the downloaded stdio bridge is the portable supported route.
+Reconnect the AI client and have it call `zebra_scene_status` first. It can search and read objects, list the allowlisted mesh metadata, replace one object's mesh source without changing its other renderer fields, apply exact-revision semantic edits, review recent changes, undo edits made by that exact connection, and save an online checkpoint. It cannot queue or push GitHub. Direct Streamable HTTP is an advanced option only for clients that let the user set a manual Authorization Bearer header; the downloaded stdio bridge is the portable supported route.
 
 The token lasts up to 30 days and can be revoked immediately from **Connect AI**. Raw tokens are shown once and are never listed later. Any signed-in room editor can revoke a connection. If the access code or a token leaks, revoke every connection and ask Tim to rotate both the editor access code and session secret; rotating only the access code does not end existing sessions or tokens. After signing in as a new browser session, use the AI's own undo tool or create a fresh connection when browser Command-Z ownership matters.
 
 ## Editable scope
 
-- The 222 original runtime-bound objects must remain present with their stable IDs, fixed hierarchy, and fixed model/primitive sources. Their transforms (including hierarchy-root transforms), visibility and authored Box Collider values are editable. They cannot be reparented, deleted, duplicated as replacement originals or pointed at arbitrary source assets.
-- The four original QR objects are the source-lock exception. Their **QR artwork** may switch only among the exact MC9400, MC3400, PS30 and TC8300 artwork family.
+- The 222 original runtime-bound objects must remain present with their stable IDs and fixed hierarchy. Their transforms (including hierarchy-root transforms), visibility, supported materials and authored Box Collider values are editable. They cannot be reparented, deleted, duplicated as replacement originals or pointed at arbitrary/non-project asset URLs.
+- Stable runtime identity is separate from visual source. The 222 original IDs, parents and gameplay roles remain protected, while any of the 204 originals that already has a Mesh Renderer may choose another checked-in Zebra GLB. The target object, transform, collider and gameplay references remain unchanged; replacement does not auto-fit the model or resize the collider. The 72-file asset pack itself cannot be uploaded into, removed from or rewritten in focused mode.
 - New persistent extras may be **Empty**, **Cube**, **Sphere**, **Cylinder**, **Capsule** or **Plane**. An extra supports an inline untextured material, an optional Box Collider, transforms, parenting, visibility, duplicate and delete.
 - Dynamic extras appear in the same persistent Zebra Edit/Play runtime and in portable exports. They do not automatically become scanners, pickups, balloons, score targets or HUD elements. Imported/custom model sources and textured extra materials are outside this Zebra-extra contract.
 
@@ -62,7 +62,7 @@ Game Port Studio is a separate private repository pinned by `game-port-studio.pr
 git clone https://github.com/Sparkah/game-port-studio.git
 git clone https://github.com/Mucchun/zebra-circus-game.git
 cd game-port-studio
-git checkout v0.17.0
+git checkout v0.18.0
 npm ci
 ```
 
@@ -80,8 +80,8 @@ The launcher prints two links. **Game** is the standalone Zebra runtime. **Edit 
 ## Load and edit Zebra locally
 
 1. The canonical `zebra-circus.scene.json` opens automatically. Wait for **Up to date** and confirm the viewport badge says **EDITING ORIGINAL ZEBRA RENDERER**. This is the actual paused `index.html` renderer, not a proxy.
-2. Select an object in **Objects** or click it in the viewport. Use **Move / Rotate / Scale** or W/E/R. Option/Alt + primary drag orbits (right/middle drag also remains available); the mouse wheel zooms; **C** toggles the authored game camera. Command-Z / Command-Shift-Z perform Undo/Redo even when the runtime canvas has focus. Collider objects show a cyan/orange wireframe helper. Original source definitions and parent links stay identity-locked; moving an original hierarchy root still moves its children.
-3. To edit a QR, select `MC9400 QR`, `MC3400 QR`, `PS30 QR`, or `TC8300 QR`. In **Mesh Renderer**, use **QR artwork** to choose one of the four exact product QR/label assets. The original runtime graphic changes immediately; Undo restores it.
+2. Select an object in **Objects** or click it in the viewport. Use **Move / Rotate / Scale** or W/E/R. Option/Alt + primary drag orbits; add Command/Ctrl to pan the camera and target (right/middle drag also remains available). The mouse wheel zooms; **C** toggles the authored game camera. Command-Z / Command-Shift-Z perform Undo/Redo even when the runtime canvas has focus. Collider objects show a cyan/orange wireframe helper. Original parent links and stable IDs remain protected; moving an original hierarchy root still moves its children.
+3. To replace a visual, select an original mesh-bearing object and choose another checked-in model from **Mesh Renderer → Mesh**. The same runtime target and gameplay role remain active. Use Command-Z to restore the prior model and Command-Shift-Z to reapply it. QR objects retain the four-board **QR artwork** convenience selector as well.
 4. Edit Box Collider centre, size, enabled state, or trigger state in the Inspector. If an object has no collider, choose **Add component** → **Box Collider**. These edits participate in Undo/Redo.
 5. Use **+ Add object** for a supported Empty or primitive extra. Configure its inline untextured material and optional Box Collider, then transform, parent, hide/show, duplicate or delete it as needed.
 6. Click **Play Zebra**. The editor resumes the same iframe, scene, canvas and WebGL context. Click **Stop** to freeze the same runtime back into editing.
@@ -104,13 +104,13 @@ GAME_PORT_STUDIO_PATH=../game-port-studio \
 node --test tests/*.test.mjs
 ```
 
-`test:zebra` also exercises the focused collaborator UI, including direct load, QR editing, iframe-focused Command-Z / Command-Shift-Z, Option/Alt primary-drag orbit, Save, confirmation/cancel, Save & Push request handling, same-iframe Play/Stop, and responsive widths. The hosted gate separately exercises the real stdio MCP bridge, token isolation/revocation and AI-to-GitHub denial. The Zebra test suite verifies the launcher configuration without performing a live GitHub push.
+`test:zebra` also exercises the focused collaborator UI, including direct load, mesh replacement, iframe-focused Command-Z / Command-Shift-Z, Option/Alt orbit, Option/Alt + Command/Ctrl pan, Save, confirmation/cancel, Save & Push request handling, same-iframe Play/Stop, and responsive widths. The hosted gate separately exercises the real stdio MCP bridge, AI mesh discovery/replacement, token isolation/revocation and AI-to-GitHub denial. The Zebra test suite verifies the launcher configuration without performing a live GitHub push.
 
-`test:zebra` fails unless the persistent original-runtime Edit and Play modes retain the same iframe/context/visual manifest and produce a byte-identical raw canvas from the same game camera. It also checks all four distinct QR textures, 40 seated plus 28 imported spectators, a real pointer gizmo drag, collider helper, QR artwork change/Undo, scan-panel X movement recovery, Stop, large-project reload and the bounded dynamic-extra contract. Separately, `test:zebra-targets` verifies portable 222-object/72-asset Three.js and Unity 6000.3.5f2 scene output; it does not assert Zebra gameplay or pixel parity.
+`test:zebra` fails unless the persistent original-runtime Edit and Play modes retain the same iframe/context/visual manifest and produce a byte-identical raw canvas from the same game camera. It also checks all four distinct QR textures, 40 seated plus 28 imported spectators, a stable-root model swap with Undo/Redo, revision-safe camera pan/orbit, a real pointer gizmo drag, collider helper, scan-panel X movement recovery, Stop, large-project reload and the bounded dynamic-extra contract. Separately, `test:zebra-targets` verifies portable 222-object/72-asset Three.js and Unity 6000.3.5f2 scene output; it does not assert Zebra gameplay or pixel parity.
 
 ## Runtime boundary and security
 
-All original persistent arena roots have stable editor IDs and fixed sources, with the exact QR family as the only source-artwork exception. Supported dynamic extras receive their own editor IDs. Gameplay-only state—balloon bob/pop/respawn, weapon pickup presentation, projectiles, particles, scan VFX, score and DOM HUD—stays in the original runtime. Authoring freezes those behaviours; Play resumes them. Dynamic extras remain visual/spatial authored objects unless Zebra-specific gameplay support is added explicitly.
+All original persistent arena roots have stable editor IDs, fixed hierarchy and fixed gameplay roles. Their visible Mesh Renderer source is a separate editable property: any mesh-bearing original can use another checked-in Zebra GLB without replacing its runtime target, transform, collider or gameplay references. Supported dynamic extras receive their own editor IDs. Gameplay-only state—balloon bob/pop/respawn, weapon pickup presentation, projectiles, particles, scan VFX, score and DOM HUD—stays in the original runtime. Authoring freezes those behaviours; Play resumes them. Dynamic extras remain visual/spatial authored objects unless Zebra-specific gameplay support is added explicitly.
 
 The bridge accepts only the exact iframe source plus an allowlisted same-origin or loopback `editorOrigin`. Every message carries the code-owned protocol, session nonce and exact scene revision:
 

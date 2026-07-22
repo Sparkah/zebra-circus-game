@@ -626,9 +626,14 @@ const editableFallbackIds = new Map();
 const editableLightTargets = new Map();
 const dynamicEditableObjectIds = new Set();
 const dynamicEditableVisualSignatures = new Map();
+const fixedEditableVisualOverrides = new Map();
+const replacementAssetTemplatePromises = new Map();
+const replacementAssetTemplates = new Map();
 const runtimeColliders = [];
 let runtimeLayoutById = new Map();
 let runtimeWorldTransforms = new Map();
+let runtimeScenePreviewGeneration = 0;
+let runtimeScenePreviewWork = Promise.resolve();
 
 const EDITOR_MESSAGE_TYPE = 'game-port-studio:scene-preview';
 const EDITOR_STATE_MESSAGE_TYPE = 'game-port-studio:editor-state';
@@ -639,11 +644,14 @@ const runtimeContextToken = globalThis.crypto?.randomUUID?.() ?? `zebra-${Date.n
 let runtimeBridgeNonce = '';
 let runtimeBridgeRevision = 0;
 let runtimeBridgePeer = null;
+let runtimePendingBridgePeer = null;
+let runtimePendingBridgeRevision = -1;
 let studioAuthoring = null;
 let requestedStudioSelection = null;
 let requestedStudioTransformMode = 'translate';
 const SAFE_EDITOR_ID = /^[a-z0-9][a-z0-9_-]{0,63}$/i;
 const EDITOR_PRIMITIVE_TYPES = new Set(['plane', 'cube', 'sphere', 'cylinder', 'capsule']);
+const SAFE_EDITOR_FILE_NAME = /^[a-z0-9][a-z0-9._-]{0,127}$/i;
 const POSITION_LIMIT = 10000;
 const ROTATION_LIMIT = 360000;
 const SCALE_MIN = 0.01;
@@ -691,6 +699,34 @@ const EXPECTED_EDITABLE_IDS = [...new Set(Object.values(EDITABLE_ID_CATEGORIES).
 const FIXED_EDITABLE_IDS = new Set(EXPECTED_EDITABLE_IDS);
 const MAX_SCENE_OBJECTS = 500;
 const MAX_SCENE_DEPTH = 64;
+
+// This is the code-owned runtime allowlist. Scene JSON may choose among these
+// visuals, but it cannot redefine an asset id, point it at another file, or
+// turn a saved replacement into the object's native Zebra identity.
+const RUNTIME_MODEL_ASSET_ENTRIES = [
+  ['asset-mc9400', 'MC9400', 'mc9400-editor.glb'],
+  ['asset-mc3400', 'MC3400', 'mc3400-editor.glb'],
+  ['asset-ps30', 'PS30', 'ps30-editor.glb'],
+  ['asset-tc8300', 'TC8300', 'tc8300-editor.glb'],
+  ['asset-tent', 'Tent', 'tent-editor.glb'],
+  ['asset-arena-circle', 'Arena Circle', 'arena-circle.glb'],
+  ['asset-dirt-ring', 'Dirt Ring', 'arena-dirt-ring.glb'],
+  ['asset-chalk-ring', 'Chalk Ring', 'arena-chalk-ring.glb'],
+  ...['mc9400', 'mc3400', 'ps30', 'tc8300'].map((id) => [`asset-qr-${id}`, `QR ${id.toUpperCase()}`, `qr-${id}.glb`]),
+  ['asset-barrel', 'Arena Barrel', 'arena-barrel.glb'],
+  ['asset-podium', 'Performer Podium', 'performer-podium.glb'],
+  ['asset-bleacher-seat', 'Bleacher Seat', 'bleacher-seat.glb'],
+  ['asset-bleacher-riser', 'Bleacher Riser', 'bleacher-riser.glb'],
+  ['asset-bunting-flag', 'Bunting Flag', 'bunting-flag.glb'],
+  ...Array.from({ length: 40 }, (_, index) => {
+    const suffix = String(index).padStart(2, '0');
+    return [`asset-crowd-seated-${suffix}`, `Seated Spectator ${suffix}`, `crowd-seated-${suffix}.glb`];
+  }),
+  ...['char1', 'char2', 'char4', 'char6', 'man', 'worker'].map((id) => [`asset-crowd-${id}`, `Crowd ${id}`, `crowd-${id}-normalized.glb`]),
+  ['asset-tent-details', 'Tent Details', 'tent-details.glb'],
+  ...['red', 'blue', 'yellow', 'green', 'magenta', 'orange', 'cyan', 'pink'].map((color) => [`asset-balloon-${color}`, `${color[0].toUpperCase()}${color.slice(1)} Balloon`, `balloon-${color}.glb`]),
+];
+const RUNTIME_MODEL_ASSET_BY_ID = new Map(RUNTIME_MODEL_ASSET_ENTRIES.map(([id, name, fileName]) => [id, { id, name, type: 'model', format: 'glb', fileName }]));
 
 function createSeededRandom(seed) {
   let state = seed >>> 0;
@@ -846,6 +882,39 @@ function sanitizeEmbeddedMaterial(definition, label) {
   return { kind: 'embedded', overrides };
 }
 
+function sanitizeRuntimeModelAssets(candidate, { allowSlimPreview = false } = {}) {
+  const expandedInventory = Array.isArray(candidate.objects)
+    && candidate.objects.some((entry) => entry?.id === 'arena-root' || entry?.id === 'balloons-root' || entry?.id === 'tent-details');
+  const suppliedAssets = Array.isArray(candidate.assets)
+    ? candidate.assets
+    : allowSlimPreview && Array.isArray(runtimeSceneDocument?.assets)
+      ? runtimeSceneDocument.assets
+      : expandedInventory
+        ? null
+        : [...RUNTIME_MODEL_ASSET_BY_ID.values()];
+  if (!suppliedAssets || suppliedAssets.length !== RUNTIME_MODEL_ASSET_BY_ID.size) {
+    throw new Error(`Scene must preserve all ${RUNTIME_MODEL_ASSET_BY_ID.size} allowlisted Zebra model assets`);
+  }
+  const seen = new Set();
+  const assets = suppliedAssets.map((asset, index) => {
+    if (!asset || typeof asset !== 'object' || Array.isArray(asset)) throw new Error(`Asset ${index} is invalid`);
+    const expected = typeof asset.id === 'string' ? RUNTIME_MODEL_ASSET_BY_ID.get(asset.id) : null;
+    if (!expected || seen.has(expected.id)) throw new Error(`Asset ${index} has an invalid or duplicate id`);
+    if (asset.type !== 'model' || asset.format !== 'glb' || asset.fileName !== expected.fileName || !SAFE_EDITOR_FILE_NAME.test(asset.fileName)) {
+      throw new Error(`Asset ${expected.id} must remain the allowlisted models/editor/${expected.fileName} GLB`);
+    }
+    if (typeof asset.name !== 'string' || !asset.name.trim() || asset.name.length > 80) throw new Error(`Asset ${expected.id} has an invalid name`);
+    seen.add(expected.id);
+    // Deliberately discard embedded bytes. The runtime loads only the exact
+    // checked-in same-origin file named by the code-owned allowlist.
+    return { id: expected.id, name: asset.name, type: 'model', format: 'glb', fileName: expected.fileName };
+  });
+  for (const id of RUNTIME_MODEL_ASSET_BY_ID.keys()) {
+    if (!seen.has(id)) throw new Error(`Scene is missing allowlisted Zebra asset ${id}`);
+  }
+  return assets;
+}
+
 function validateSceneDocument(candidate, { allowSlimPreview = false } = {}) {
   if (!candidate || typeof candidate !== 'object' || Array.isArray(candidate)) throw new Error('Scene must be an object');
   if (!['game-port-studio/scene@0.13', 'game-port-studio/scene@0.14'].includes(candidate.schema)) throw new Error('Unsupported scene schema');
@@ -874,6 +943,8 @@ function validateSceneDocument(candidate, { allowSlimPreview = false } = {}) {
   });
   if (!inputActions.some((action) => action.id === 'move' && action.valueType === 'vector2')) throw new Error('Scene is missing the move input action');
   if (!Array.isArray(candidate.objects) || candidate.objects.length > MAX_SCENE_OBJECTS) throw new Error('Scene objects are invalid');
+  const assets = sanitizeRuntimeModelAssets(candidate, { allowSlimPreview });
+  const assetsById = new Map(assets.map((asset) => [asset.id, asset]));
 
   const ids = new Set();
   const caseFoldedIds = new Set();
@@ -900,6 +971,7 @@ function validateSceneDocument(candidate, { allowSlimPreview = false } = {}) {
             ? { kind: 'primitive', primitive: component.source.primitive }
             : null;
         if (!source) throw new Error(`Object ${entry.id} mesh source is invalid`);
+        if (source.kind === 'asset' && !assetsById.has(source.assetId)) throw new Error(`Object ${entry.id} uses unavailable asset-backed mesh ${source.assetId}`);
         const material = component.material?.kind === 'embedded'
           ? sanitizeEmbeddedMaterial(component.material, `Object ${entry.id} material`)
           : component.material?.kind === 'inline'
@@ -907,6 +979,7 @@ function validateSceneDocument(candidate, { allowSlimPreview = false } = {}) {
             : null;
         if (!material) throw new Error(`Object ${entry.id} material is invalid`);
         if (source.kind === 'primitive' && material.kind !== 'inline') throw new Error(`Object ${entry.id} primitive mesh requires an inline material`);
+        if (material.kind === 'inline' && material.baseColorTextureAssetId !== null) throw new Error(`Object ${entry.id} references an unavailable image texture asset`);
         components.push({ id: component.id, type: 'mesh-renderer', enabled: component.enabled, source, material });
       } else if (component.type === 'box-collider') {
         if (typeof component.enabled !== 'boolean' || typeof component.isTrigger !== 'boolean') throw new Error(`Object ${entry.id} collider flags are invalid`);
@@ -1000,7 +1073,7 @@ function validateSceneDocument(candidate, { allowSlimPreview = false } = {}) {
       throw new Error(`Added object ${object.id} uses an image texture; embedded image authoring is not available in Zebra runtime`);
     }
   }
-  return { schema: candidate.schema, name: candidate.name, inputActions, objects };
+  return { schema: candidate.schema, name: candidate.name, inputActions, assets, objects };
 }
 
 async function loadSceneDocument() {
@@ -1055,6 +1128,42 @@ function postScenePreviewRejected(event, data, error) {
   }, event.origin);
 }
 
+function queueScenePreviewApplication(event, data, document) {
+  const generation = ++runtimeScenePreviewGeneration;
+  runtimePendingBridgePeer = { source: event.source, origin: event.origin, nonce: data.nonce };
+  runtimePendingBridgeRevision = data.revision;
+  const work = (async () => {
+    try {
+      await prepareSceneVisuals(document);
+      if (generation !== runtimeScenePreviewGeneration) {
+        postScenePreviewRejected(event, data, `Scene preview revision ${data.revision} was superseded by a newer visual request`);
+        return;
+      }
+      applySceneDocument(document, 'live-editor');
+      runtimeBridgePeer = { source: event.source, origin: event.origin };
+      runtimeBridgeNonce = data.nonce;
+      runtimeBridgeRevision = data.revision;
+      runtimePendingBridgePeer = null;
+      runtimePendingBridgeRevision = runtimeBridgeRevision;
+      liveEditorSceneApplied = true;
+      postRuntimeBridge({
+        type: 'game-port-studio:scene-preview-applied',
+        objectCount: document.objects.length,
+        contextToken: runtimeContextToken,
+        visualManifestHash: runtimeVisualManifestHash(),
+      });
+      requestStudioEditorRender();
+    } catch (error) {
+      if (generation !== runtimeScenePreviewGeneration) return;
+      runtimePendingBridgePeer = null;
+      runtimePendingBridgeRevision = runtimeBridgeRevision;
+      console.warn(`Rejected editor scene preview: ${error.message}`);
+      postScenePreviewRejected(event, data, error);
+    }
+  })();
+  runtimeScenePreviewWork = work;
+}
+
 window.addEventListener('message', (event) => {
   if (!allowedEditorOrigins.has(event.origin)) return;
   const trustedSource = event.source === window
@@ -1076,28 +1185,23 @@ window.addEventListener('message', (event) => {
       postScenePreviewRejected(event, data, 'Scene preview revision must be an integer');
       return;
     }
-    if (data.revision < runtimeBridgeRevision) {
-      postScenePreviewRejected(event, data, `Scene preview revision ${data.revision} is older than active revision ${runtimeBridgeRevision}`);
+    const minimumRevision = Math.max(runtimeBridgeRevision, runtimePendingBridgeRevision);
+    if (data.revision < minimumRevision) {
+      const revisionLabel = runtimePendingBridgeRevision > runtimeBridgeRevision ? 'active or pending' : 'active';
+      postScenePreviewRejected(event, data, `Scene preview revision ${data.revision} is older than ${revisionLabel} revision ${minimumRevision}`);
       return;
     }
     if (runtimeBridgePeer && (runtimeBridgePeer.source !== event.source || runtimeBridgePeer.origin !== event.origin || runtimeBridgeNonce !== data.nonce)) {
       postScenePreviewRejected(event, data, 'Scene preview does not match the active editor peer');
       return;
     }
+    if (runtimePendingBridgePeer && (runtimePendingBridgePeer.source !== event.source || runtimePendingBridgePeer.origin !== event.origin || runtimePendingBridgePeer.nonce !== data.nonce)) {
+      postScenePreviewRejected(event, data, 'Scene preview does not match the pending editor peer');
+      return;
+    }
     try {
       const document = validateSceneDocument(data.scene, { allowSlimPreview: true });
-      applySceneDocument(document, 'live-editor');
-      runtimeBridgePeer = { source: event.source, origin: event.origin };
-      runtimeBridgeNonce = data.nonce;
-      runtimeBridgeRevision = data.revision;
-      liveEditorSceneApplied = true;
-      postRuntimeBridge({
-        type: 'game-port-studio:scene-preview-applied',
-        objectCount: document.objects.length,
-        contextToken: runtimeContextToken,
-        visualManifestHash: runtimeVisualManifestHash(),
-      });
-      requestStudioEditorRender();
+      queueScenePreviewApplication(event, data, document);
     } catch (error) {
       console.warn(`Rejected editor scene preview: ${error.message}`);
       postScenePreviewRejected(event, data, error);
@@ -1137,13 +1241,15 @@ function postRuntimeBridge(message) {
 // ═══════════════════════════════════════════════
 window.addEventListener('load', async () => {
   const initialSceneDocument = await loadSceneDocument();
+  const previewGenerationBeforePrepare = runtimeScenePreviewGeneration;
+  await prepareSceneVisuals(initialSceneDocument);
+  if (runtimeScenePreviewGeneration !== previewGenerationBeforePrepare) await runtimeScenePreviewWork;
   if (!liveEditorSceneApplied) applySceneDocument(initialSceneDocument, runtimeSceneSource);
   else runtimeSceneSource = 'live-editor';
-  loadDeviceModels().then(() => {
-    document.getElementById('loading-screen').style.display = 'none';
-    if (STUDIO_AUTHORING_MODE) startStudioAuthoring();
-    else document.getElementById('start-screen').style.display = 'flex';
-  });
+  await loadDeviceModels();
+  document.getElementById('loading-screen').style.display = 'none';
+  if (STUDIO_AUTHORING_MODE) startStudioAuthoring();
+  else document.getElementById('start-screen').style.display = 'flex';
 });
 
 function loadDeviceModels() {
@@ -1322,44 +1428,279 @@ function applyInlineMaterialDefinition(material, definition) {
   material.needsUpdate = true;
 }
 
-function applyQrAssetSelection(id, target, rendererComponent) {
-  if (!id.startsWith('qr-') || rendererComponent?.source?.kind !== 'asset') return;
-  const match = /^asset-qr-(mc9400|mc3400|ps30|tc8300)$/i.exec(rendererComponent.source.assetId);
-  if (!match) return;
-  const weapon = WEAPONS.find((entry) => entry.id.toLowerCase() === match[1].toLowerCase());
-  if (!weapon || target.userData.appliedQrAssetId === rendererComponent.source.assetId) return;
+function syncRuntimeQrProduct(id, target, rendererComponent) {
+  if (!id.startsWith('qr-')) return;
+  const selectedProduct = rendererComponent?.source?.kind === 'asset'
+    ? /^asset-qr-(mc9400|mc3400|ps30|tc8300)$/i.exec(rendererComponent.source.assetId)?.[1]
+    : null;
+  const identityProduct = /^qr-(mc9400|mc3400|ps30|tc8300)$/i.exec(id)?.[1];
+  const product = selectedProduct ?? identityProduct;
+  const weapon = WEAPONS.find((entry) => entry.id.toLowerCase() === product?.toLowerCase());
+  const runtimeQr = qrObjs.find((entry) => entry.g === target);
+  if (runtimeQr && weapon) runtimeQr.w = weapon;
+  const desiredAssetId = weapon ? `asset-qr-${weapon.id.toLowerCase()}` : null;
+  if (!weapon || !desiredAssetId || target.userData.appliedQrAssetId === desiredAssetId) return;
+  // Keep the native board's semantic texture in sync even while its materials
+  // are concealed beneath a GLB override. Existing QR gameplay and validation
+  // can then observe the selected product, and Undo restores the original board
+  // without replacing the stable QR target.
   const qrFace = target.children.find((child) => child.material?.name === 'QrFace') || target.children[1];
   const label = target.children.find((child) => child.material?.name === 'Label') || target.children[2];
-  if (qrFace?.material) {
-    qrFace.material.map?.dispose?.();
-    qrFace.material.map = makeQRTexture(weapon);
-    qrFace.material.needsUpdate = true;
+  const activeOverride = fixedEditableVisualOverrides.get(id);
+  const nativeMaterial = (mesh) => activeOverride?.nativeMaterials.find((entry) => entry.mesh === mesh)?.original ?? mesh?.material;
+  const qrMaterial = nativeMaterial(qrFace);
+  const labelMaterial = nativeMaterial(label);
+  if (qrMaterial) {
+    qrMaterial.map?.dispose?.();
+    qrMaterial.map = makeQRTexture(weapon);
+    qrMaterial.needsUpdate = true;
   }
-  if (label?.material) {
-    label.material.map?.dispose?.();
-    label.material.map = makeQRLabelTexture(weapon);
-    label.material.needsUpdate = true;
+  if (labelMaterial) {
+    labelMaterial.map?.dispose?.();
+    labelMaterial.map = makeQRLabelTexture(weapon);
+    labelMaterial.needsUpdate = true;
   }
-  const runtimeQr = qrObjs.find((entry) => entry.g === target);
-  if (runtimeQr) runtimeQr.w = weapon;
-  target.userData.visualSource = `qr-board:${weapon.id}`;
-  target.userData.appliedQrAssetId = rendererComponent.source.assetId;
+  target.userData.appliedQrAssetId = desiredAssetId;
+}
+
+function meshSourcesEqual(left, right) {
+  if (!left || !right || left.kind !== right.kind) return false;
+  return left.kind === 'asset'
+    ? left.assetId === right.assetId
+    : left.primitive === right.primitive;
+}
+
+function nativeMeshSourceForObject(id) {
+  const directAssets = {
+    'arena-floor': 'asset-arena-circle',
+    'arena-dirt-ring': 'asset-dirt-ring',
+    'arena-performance-ring': 'asset-arena-circle',
+    'arena-chalk-ring': 'asset-chalk-ring',
+    tent: 'asset-tent',
+    'tent-details': 'asset-tent-details',
+    'center-plinth': 'asset-podium',
+  };
+  if (directAssets[id]) return { kind: 'asset', assetId: directAssets[id] };
+  const weapon = /^weapon-(mc9400|mc3400|ps30|tc8300)$/.exec(id)?.[1];
+  if (weapon) return { kind: 'asset', assetId: `asset-${weapon}` };
+  const qr = /^qr-(mc9400|mc3400|ps30|tc8300)$/.exec(id)?.[1];
+  if (qr) return { kind: 'asset', assetId: `asset-qr-${qr}` };
+  if (/^barrel-[0-3]$/.test(id)) return { kind: 'asset', assetId: 'asset-barrel' };
+  if (TRAPEZE_IDS.includes(id)) return { kind: 'primitive', primitive: 'cylinder' };
+  if (BLEACHER_SEAT_IDS.includes(id)) return { kind: 'asset', assetId: 'asset-bleacher-seat' };
+  if (BLEACHER_RISER_IDS.includes(id)) return { kind: 'asset', assetId: 'asset-bleacher-riser' };
+  if (BLEACHER_STRUT_IDS.includes(id)) return { kind: 'primitive', primitive: 'cube' };
+  if (BUNTING_IDS.includes(id)) return { kind: 'asset', assetId: 'asset-bunting-flag' };
+  const proceduralCrowd = /^crowd-proc-(\d{2})$/.exec(id)?.[1];
+  if (proceduralCrowd !== undefined && Number(proceduralCrowd) < 40) return { kind: 'asset', assetId: `asset-crowd-seated-${proceduralCrowd}` };
+  const importedCrowd = /^crowd-gltf-(\d{2})$/.exec(id)?.[1];
+  if (importedCrowd !== undefined && Number(importedCrowd) < 28) {
+    const cycle = ['char1', 'char2', 'char4', 'char6', 'man', 'worker'];
+    return { kind: 'asset', assetId: `asset-crowd-${cycle[Number(importedCrowd) % cycle.length]}` };
+  }
+  const balloon = /^balloon-(\d{2})$/.exec(id)?.[1];
+  if (balloon !== undefined && Number(balloon) < 28) {
+    const colors = ['red', 'blue', 'yellow', 'green', 'magenta', 'orange', 'cyan', 'pink'];
+    return { kind: 'asset', assetId: `asset-balloon-${colors[Number(balloon) % colors.length]}` };
+  }
+  return null;
+}
+
+function runtimeAssetForDocument(document, assetId) {
+  const asset = document?.assets?.find((entry) => entry.id === assetId);
+  const expected = RUNTIME_MODEL_ASSET_BY_ID.get(assetId);
+  if (!asset || !expected || asset.fileName !== expected.fileName || asset.type !== 'model' || asset.format !== 'glb') {
+    throw new Error(`Zebra replacement asset ${assetId} is unavailable`);
+  }
+  return asset;
+}
+
+function loadReplacementAssetTemplate(document, assetId) {
+  if (replacementAssetTemplates.has(assetId)) return Promise.resolve(replacementAssetTemplates.get(assetId));
+  if (replacementAssetTemplatePromises.has(assetId)) return replacementAssetTemplatePromises.get(assetId);
+  const asset = runtimeAssetForDocument(document, assetId);
+  const url = new URL(`models/editor/${encodeURIComponent(asset.fileName)}`, location.href);
+  if (url.origin !== location.origin) return Promise.reject(new Error(`Replacement asset ${assetId} must be same-origin`));
+  let guardedPromise;
+  const loadPromise = new Promise((resolve, reject) => {
+    new THREE.GLTFLoader().load(
+      url.href,
+      (gltf) => {
+        if (!gltf?.scene) {
+          reject(new Error(`Replacement asset ${assetId} did not contain a scene`));
+          return;
+        }
+        replacementAssetTemplates.set(assetId, gltf.scene);
+        resolve(gltf.scene);
+      },
+      undefined,
+      () => reject(new Error(`Could not load replacement asset ${assetId} from models/editor/${asset.fileName}`)),
+    );
+  });
+  guardedPromise = loadPromise.catch((error) => {
+    if (replacementAssetTemplatePromises.get(assetId) === guardedPromise) replacementAssetTemplatePromises.delete(assetId);
+    throw error;
+  });
+  replacementAssetTemplatePromises.set(assetId, guardedPromise);
+  return guardedPromise;
+}
+
+async function prepareSceneVisuals(document) {
+  const requiredAssets = new Set();
+  for (const layout of document.objects) {
+    if (!FIXED_EDITABLE_IDS.has(layout.id)) continue;
+    const rendererComponent = layout.components.find((component) => component.type === 'mesh-renderer');
+    const nativeSource = nativeMeshSourceForObject(layout.id);
+    if (!rendererComponent || !nativeSource || meshSourcesEqual(rendererComponent.source, nativeSource)) continue;
+    if (rendererComponent.source.kind === 'asset') requiredAssets.add(rendererComponent.source.assetId);
+  }
+  await Promise.all([...requiredAssets].map((assetId) => loadReplacementAssetTemplate(document, assetId)));
 }
 
 function traverseOwnedRuntimeObject(target, visit) {
   const walk = (node) => {
-    if (node !== target && node.userData?.editorObjectId) return;
+    if (node !== target && (node.userData?.editorObjectId || node.userData?.studioVisualOverride)) return;
     visit(node);
     for (const child of node.children || []) walk(child);
   };
   walk(target);
 }
 
+function applyRendererMaterial(root, rendererComponent) {
+  if (rendererComponent.material?.kind === 'inline') {
+    root.traverse((child) => {
+      if (!child.isMesh) return;
+      for (const material of Array.isArray(child.material) ? child.material : [child.material]) applyInlineMaterialDefinition(material, rendererComponent.material);
+    });
+    return;
+  }
+  if (rendererComponent.material?.kind !== 'embedded') return;
+  for (const override of rendererComponent.material.overrides || []) {
+    root.traverse((child) => {
+      if (!child.isMesh) return;
+      for (const material of Array.isArray(child.material) ? child.material : [child.material]) {
+        if (material?.name === override.slot) applyInlineMaterialDefinition(material, override.material);
+      }
+    });
+  }
+}
+
+function concealOwnedNativeMeshes(target, override) {
+  traverseOwnedRuntimeObject(target, (child) => {
+    if (!child.isMesh || override.nativeMaterials.some((entry) => entry.mesh === child)) return;
+    const original = child.material;
+    const hidden = (Array.isArray(original) ? original : [original]).map((material) => {
+      const clone = material?.clone?.() ?? material;
+      if (clone) clone.visible = false;
+      return clone;
+    });
+    child.material = Array.isArray(original) ? hidden : hidden[0];
+    override.nativeMaterials.push({ mesh: child, original, hidden });
+  });
+}
+
+function disposeFixedEditableVisualOverride(id) {
+  const override = fixedEditableVisualOverrides.get(id);
+  if (!override) return;
+  for (const entry of override.nativeMaterials) {
+    entry.mesh.material = entry.original;
+    for (const material of entry.hidden) {
+      if (material !== entry.original && !(Array.isArray(entry.original) && entry.original.includes(material))) material?.dispose?.();
+    }
+  }
+  if (override.root.parent) override.root.parent.remove(override.root);
+  override.root.traverse((child) => {
+    const materials = child.material ? (Array.isArray(child.material) ? child.material : [child.material]) : [];
+    for (const material of materials) material?.dispose?.();
+    if (override.kind === 'primitive') child.geometry?.dispose?.();
+  });
+  if (override.target?.userData) override.target.userData.activeEditorVisualSource = override.nativeSource;
+  fixedEditableVisualOverrides.delete(id);
+}
+
+function cloneReplacementAssetVisual(template) {
+  const clone = template.clone(true);
+  clone.traverse((child) => {
+    if (!child.isMesh || !child.material) return;
+    child.material = Array.isArray(child.material)
+      ? child.material.map((material) => material.clone())
+      : child.material.clone();
+  });
+  return clone;
+}
+
+function createFixedEditableVisualOverride(id, target, rendererComponent, nativeSource, signature) {
+  const root = new THREE.Group();
+  root.name = `${id} Replacement Visual`;
+  root.userData.studioVisualOverride = true;
+  root.userData.visualSource = rendererComponent.source.kind === 'asset'
+    ? `asset:${rendererComponent.source.assetId}`
+    : `primitive:${rendererComponent.source.primitive}`;
+  let kind;
+  if (rendererComponent.source.kind === 'asset') {
+    const template = replacementAssetTemplates.get(rendererComponent.source.assetId);
+    if (!template) throw new Error(`Replacement asset ${rendererComponent.source.assetId} was not prepared`);
+    root.add(cloneReplacementAssetVisual(template));
+    kind = 'asset';
+  } else {
+    root.add(new THREE.Mesh(
+      createDynamicPrimitiveGeometry(rendererComponent.source.primitive),
+      createDynamicInlineMaterial(rendererComponent.material),
+    ));
+    kind = 'primitive';
+  }
+  applyRendererMaterial(root, rendererComponent);
+  root.visible = rendererComponent.enabled;
+  const override = {
+    id,
+    target,
+    root,
+    kind,
+    signature,
+    source: rendererComponent.source.kind === 'asset' ? rendererComponent.source.assetId : rendererComponent.source.primitive,
+    nativeSource: nativeSource.kind === 'asset' ? nativeSource.assetId : nativeSource.primitive,
+    nativeMaterials: [],
+  };
+  concealOwnedNativeMeshes(target, override);
+  target.add(root);
+  target.userData.activeEditorVisualSource = root.userData.visualSource;
+  fixedEditableVisualOverrides.set(id, override);
+  return override;
+}
+
+function reconcileFixedEditableVisual(id, target, rendererComponent) {
+  const nativeSource = nativeMeshSourceForObject(id);
+  if (!nativeSource || meshSourcesEqual(rendererComponent.source, nativeSource)) {
+    disposeFixedEditableVisualOverride(id);
+    target.userData.activeEditorVisualSource = nativeSource
+      ? `${nativeSource.kind}:${nativeSource.kind === 'asset' ? nativeSource.assetId : nativeSource.primitive}`
+      : 'native';
+    return null;
+  }
+  const signature = JSON.stringify({ source: rendererComponent.source, material: rendererComponent.material, enabled: rendererComponent.enabled });
+  let override = fixedEditableVisualOverrides.get(id);
+  if (!override || override.target !== target || override.signature !== signature) {
+    disposeFixedEditableVisualOverride(id);
+    override = createFixedEditableVisualOverride(id, target, rendererComponent, nativeSource, signature);
+  } else {
+    override.root.visible = rendererComponent.enabled;
+    concealOwnedNativeMeshes(target, override);
+  }
+  return override;
+}
+
 function applyEditableVisual(id, target, resolved) {
   const rendererComponent = resolved.layout.components.find((component) => component.type === 'mesh-renderer');
-  if (!rendererComponent) return;
+  if (!rendererComponent) {
+    disposeFixedEditableVisualOverride(id);
+    return;
+  }
   target.visible = target.visible && rendererComponent.enabled;
-  applyQrAssetSelection(id, target, rendererComponent);
+  syncRuntimeQrProduct(id, target, rendererComponent);
+  const fixedOverride = FIXED_EDITABLE_IDS.has(id)
+    ? reconcileFixedEditableVisual(id, target, rendererComponent)
+    : null;
+  if (fixedOverride) return;
   if (rendererComponent.material?.kind === 'inline') {
     traverseOwnedRuntimeObject(target, (child) => {
       if (!child.isMesh) return;
@@ -1535,12 +1876,14 @@ function registerEditableObject(id, target, { fallbackId = null, lightTarget = n
 }
 
 function clearEditableRuntimeRegistry() {
+  for (const id of [...fixedEditableVisualOverrides.keys()]) disposeFixedEditableVisualOverride(id);
   for (const id of [...dynamicEditableObjectIds]) disposeDynamicEditableObject(id);
   editableObjects.clear();
   editableFallbackIds.clear();
   editableLightTargets.clear();
   dynamicEditableObjectIds.clear();
   dynamicEditableVisualSignatures.clear();
+  fixedEditableVisualOverrides.clear();
   runtimeColliders.length = 0;
 }
 
@@ -1629,7 +1972,7 @@ function runtimeObjectVisualFingerprint(id, target) {
   let lights = 0;
   const geometry = [];
   const materials = [];
-  traverseOwnedRuntimeObject(target, (child) => {
+  const visit = (child) => {
     if (child.userData?.studioHelper) return;
     if (child.isLight) {
       lights += 1;
@@ -1648,12 +1991,17 @@ function runtimeObjectVisualFingerprint(id, target) {
         material.emissive?.getHexString?.() || '',
         material.opacity,
         material.transparent,
+        material.visible,
         material.side,
+        child.visible,
         textureVisualSignature(material.map),
       ].join(':'));
     }
-  });
-  return hashText(`${id}|${target.userData.visualSource || ''}|${meshes}|${lights}|${geometry.sort().join(',')}|${materials.sort().join(',')}`);
+  };
+  traverseOwnedRuntimeObject(target, visit);
+  const override = fixedEditableVisualOverrides.get(id);
+  override?.root.traverse(visit);
+  return hashText(`${id}|${target.userData.activeEditorVisualSource || target.userData.visualSource || ''}|${override?.signature || ''}|${override?.root.visible ?? ''}|${meshes}|${lights}|${geometry.sort().join(',')}|${materials.sort().join(',')}`);
 }
 
 function runtimeVisualManifest() {
@@ -1664,6 +2012,44 @@ function runtimeVisualManifest() {
 
 function runtimeVisualManifestHash() {
   return hashText(runtimeVisualManifest().map((entry) => `${entry.id}:${entry.fingerprint}`).join('|'));
+}
+
+function fixedMeshVisualState() {
+  if (!runtimeSceneDocument) return [];
+  return runtimeSceneDocument.objects.flatMap((layout) => {
+    if (!FIXED_EDITABLE_IDS.has(layout.id)) return [];
+    const rendererComponent = layout.components.find((component) => component.type === 'mesh-renderer');
+    if (!rendererComponent) return [];
+    const target = editableObjects.get(layout.id);
+    const override = fixedEditableVisualOverrides.get(layout.id);
+    let nativeMeshCount = 0;
+    if (target) traverseOwnedRuntimeObject(target, (child) => { if (child.isMesh) nativeMeshCount += 1; });
+    let overrideMeshCount = 0;
+    override?.root.traverse((child) => { if (child.isMesh) overrideMeshCount += 1; });
+    const collider = layout.components.find((component) => component.type === 'box-collider');
+    const requestedSource = rendererComponent.source.kind === 'asset'
+      ? `asset:${rendererComponent.source.assetId}`
+      : `primitive:${rendererComponent.source.primitive}`;
+    const nativeSource = nativeMeshSourceForObject(layout.id);
+    return [{
+      id: layout.id,
+      targetUuid: target?.uuid ?? null,
+      requestedSource,
+      activeSource: target?.userData?.activeEditorVisualSource ?? requestedSource,
+      nativeSource: nativeSource ? `${nativeSource.kind}:${nativeSource.kind === 'asset' ? nativeSource.assetId : nativeSource.primitive}` : null,
+      overridden: Boolean(override),
+      overrideRootUuid: override?.root.uuid ?? null,
+      overrideMeshCount,
+      nativeMeshCount,
+      collider: collider ? {
+        enabled: collider.enabled,
+        center: { ...collider.center },
+        size: { ...collider.size },
+        isTrigger: collider.isTrigger,
+        targetUuid: target?.uuid ?? null,
+      } : null,
+    }];
+  });
 }
 
 function runtimeRenderState() {
@@ -1679,6 +2065,7 @@ function runtimeRenderState() {
     shadowMapType: renderer?.shadowMap?.type ?? null,
     fogType: scene?.fog?.isFogExp2 ? 'FogExp2' : scene?.fog?.isFog ? 'Fog' : null,
     fogDensity: scene?.fog?.density ?? null,
+    meshOverrideCount: fixedEditableVisualOverrides.size,
     visualManifestHash: runtimeVisualManifestHash(),
   };
 }
@@ -1709,7 +2096,7 @@ function startStudioAuthoring() {
   editorCamera.position.set(11, 7.5, 13);
   const badge = document.createElement('div');
   badge.className = 'studio-authoring-badge';
-  badge.innerHTML = '<strong>EDITING ORIGINAL ZEBRA RENDERER</strong>Click to select · Option/Alt-drag orbit · W/E/R tools · C camera<br><button type="button">Game camera</button>';
+  badge.innerHTML = '<strong>EDITING ORIGINAL ZEBRA RENDERER</strong>Click to select · Option/Alt-drag orbit · add Command/Ctrl to pan · W/E/R tools · C camera<br><button type="button">Game camera</button>';
   document.body.appendChild(badge);
 
   studioAuthoring = {
@@ -1726,7 +2113,7 @@ function startStudioAuthoring() {
     colliderHelper: null,
     gizmo: null,
     drag: null,
-    orbitDrag: null,
+    cameraDrag: null,
     renderPending: false,
     loopStarted: false,
     controlsBound: true,
@@ -1763,8 +2150,11 @@ function installStudioAuthoringInput() {
   canvas.addEventListener('contextmenu', (event) => event.preventDefault());
   canvas.addEventListener('pointerdown', (event) => {
     if (!studioAuthoring || studioAuthoring.mode !== 'authoring') return;
-    if (event.button === 2 || event.button === 1 || (event.button === 0 && event.altKey)) {
+    const panGesture = event.button === 0 && event.altKey && (event.metaKey || event.ctrlKey);
+    const orbitGesture = event.button === 2 || event.button === 1 || (event.button === 0 && event.altKey);
+    if (orbitGesture) {
       event.preventDefault();
+      if (studioAuthoring.cameraDrag || studioAuthoring.drag) return;
       if (studioAuthoring.cameraView !== 'orbit') {
         studioAuthoring.cameraView = 'orbit';
         const button = studioAuthoring.badge.querySelector('button');
@@ -1772,11 +2162,35 @@ function installStudioAuthoringInput() {
         refreshStudioAuthoringHelpers();
         requestStudioEditorRender();
       }
-      studioAuthoring.orbitDrag = { pointerId: event.pointerId, x: event.clientX, y: event.clientY, yaw: studioAuthoring.orbitYaw, pitch: studioAuthoring.orbitPitch };
-      canvas.setPointerCapture(event.pointerId);
+      updateStudioOrbitCamera();
+      const rect = canvas.getBoundingClientRect();
+      const unitsPerPixel = 2 * studioAuthoring.orbitDistance * Math.tan(studioAuthoring.editorCamera.fov * Math.PI / 360) / Math.max(1, rect.height);
+      studioAuthoring.cameraDrag = panGesture ? {
+        kind: 'pan',
+        pointerId: event.pointerId,
+        x: event.clientX,
+        y: event.clientY,
+        target: studioAuthoring.orbitTarget.clone(),
+        right: new THREE.Vector3().setFromMatrixColumn(studioAuthoring.editorCamera.matrixWorld, 0).normalize(),
+        up: new THREE.Vector3().setFromMatrixColumn(studioAuthoring.editorCamera.matrixWorld, 1).normalize(),
+        unitsPerPixel,
+        yaw: studioAuthoring.orbitYaw,
+        pitch: studioAuthoring.orbitPitch,
+        distance: studioAuthoring.orbitDistance,
+      } : {
+        kind: 'orbit',
+        pointerId: event.pointerId,
+        x: event.clientX,
+        y: event.clientY,
+        yaw: studioAuthoring.orbitYaw,
+        pitch: studioAuthoring.orbitPitch,
+        distance: studioAuthoring.orbitDistance,
+      };
+      canvas.setPointerCapture?.(event.pointerId);
       return;
     }
     if (event.button !== 0) return;
+    if (studioAuthoring.cameraDrag || studioAuthoring.drag) return;
     updatePointer(event);
     const activeCamera = studioAuthoring.cameraView === 'game' ? camera : studioAuthoring.editorCamera;
     raycaster.setFromCamera(pointer, activeCamera);
@@ -1812,9 +2226,18 @@ function installStudioAuthoringInput() {
 
   canvas.addEventListener('pointermove', (event) => {
     if (!studioAuthoring || studioAuthoring.mode !== 'authoring') return;
-    if (studioAuthoring.orbitDrag?.pointerId === event.pointerId) {
-      studioAuthoring.orbitYaw = studioAuthoring.orbitDrag.yaw - (event.clientX - studioAuthoring.orbitDrag.x) * 0.006;
-      studioAuthoring.orbitPitch = Math.max(-1.35, Math.min(1.35, studioAuthoring.orbitDrag.pitch + (event.clientY - studioAuthoring.orbitDrag.y) * 0.006));
+    const cameraDrag = studioAuthoring.cameraDrag;
+    if (cameraDrag?.pointerId === event.pointerId) {
+      const dx = event.clientX - cameraDrag.x;
+      const dy = event.clientY - cameraDrag.y;
+      if (cameraDrag.kind === 'pan') {
+        studioAuthoring.orbitTarget.copy(cameraDrag.target)
+          .addScaledVector(cameraDrag.right, -dx * cameraDrag.unitsPerPixel)
+          .addScaledVector(cameraDrag.up, dy * cameraDrag.unitsPerPixel);
+      } else {
+        studioAuthoring.orbitYaw = cameraDrag.yaw - dx * 0.006;
+        studioAuthoring.orbitPitch = Math.max(-1.35, Math.min(1.35, cameraDrag.pitch + dy * 0.006));
+      }
       updateStudioOrbitCamera();
       requestStudioEditorRender();
       return;
@@ -1843,10 +2266,14 @@ function installStudioAuthoringInput() {
 
   const finishPointer = (event) => {
     if (!studioAuthoring) return;
-    if (studioAuthoring.orbitDrag && studioAuthoring.orbitDrag.pointerId !== event.pointerId) return;
-    studioAuthoring.orbitDrag = null;
-    const drag = studioAuthoring.drag;
-    studioAuthoring.drag = null;
+    const cameraDrag = studioAuthoring.cameraDrag?.pointerId === event.pointerId
+      ? studioAuthoring.cameraDrag
+      : null;
+    if (cameraDrag) studioAuthoring.cameraDrag = null;
+    const drag = studioAuthoring.drag?.pointerId === event.pointerId
+      ? studioAuthoring.drag
+      : null;
+    if (drag) studioAuthoring.drag = null;
     if (drag && studioAuthoring.selectedId) {
       const layout = layoutObject(studioAuthoring.selectedId);
       if (layout) postRuntimeBridge({
@@ -1855,10 +2282,11 @@ function installStudioAuthoringInput() {
         transform: { position: { ...layout.position }, rotation: { ...layout.rotation }, scale: { ...layout.scale } },
       });
     }
-    if (canvas.hasPointerCapture?.(event.pointerId)) canvas.releasePointerCapture(event.pointerId);
+    if ((cameraDrag || drag) && event.type !== 'lostpointercapture' && canvas.hasPointerCapture?.(event.pointerId)) canvas.releasePointerCapture(event.pointerId);
   };
   canvas.addEventListener('pointerup', finishPointer);
   canvas.addEventListener('pointercancel', finishPointer);
+  canvas.addEventListener('lostpointercapture', finishPointer);
   canvas.addEventListener('wheel', (event) => {
     if (!studioAuthoring || studioAuthoring.mode !== 'authoring' || studioAuthoring.cameraView !== 'orbit') return;
     event.preventDefault();
@@ -2150,10 +2578,15 @@ if (STUDIO_AUTHORING_MODE) {
         yaw: studioAuthoring.orbitYaw,
         pitch: studioAuthoring.orbitPitch,
         distance: studioAuthoring.orbitDistance,
+        target: studioAuthoring.orbitTarget.toArray(),
         cameraPosition: studioAuthoring.editorCamera.position.toArray(),
+        drag: studioAuthoring.cameraDrag ? { kind: studioAuthoring.cameraDrag.kind, pointerId: studioAuthoring.cameraDrag.pointerId } : null,
       } : null,
+      sceneDocumentHash: runtimeSceneDocument ? hashText(JSON.stringify(runtimeSceneDocument)) : null,
+      assetCount: runtimeSceneDocument?.assets?.length ?? 0,
       renderState: runtimeRenderState(),
       visualManifest: runtimeVisualManifest(),
+      meshVisuals: fixedMeshVisualState(),
       dynamicObjectIds: [...dynamicEditableObjectIds].sort(),
       qrTextureHashes: qrObjs.map((entry) => ({ id: entry.editorId, hash: textureVisualSignature(entry.g.children.find((child) => child.material?.map)?.material?.map) })),
       crowd: {
@@ -2245,6 +2678,11 @@ function initRenderer() {
     renderer.setSize(window.innerWidth, window.innerHeight);
     camera.aspect = window.innerWidth / window.innerHeight;
     camera.updateProjectionMatrix();
+    if (studioAuthoring?.editorCamera) {
+      studioAuthoring.editorCamera.aspect = window.innerWidth / window.innerHeight;
+      studioAuthoring.editorCamera.updateProjectionMatrix();
+      requestStudioEditorRender();
+    }
   });
 }
 

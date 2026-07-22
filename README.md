@@ -24,9 +24,9 @@ python3 -m http.server 8765 --bind 127.0.0.1
 # then open http://127.0.0.1:8765/
 ```
 
-To move arena objects, edit colliders, change QR artwork, add simple scene objects, and save the reviewed scene back to GitHub, follow [EDITOR.md](EDITOR.md).
+To move arena objects, physically navigate the authoring camera, replace an existing object's visual mesh, edit colliders, add simple scene objects, and save the reviewed scene back to GitHub, follow [EDITOR.md](EDITOR.md).
 
-**Online scene editor:** [zebra-scene-editor.timofeymarkin98.workers.dev](https://zebra-scene-editor.timofeymarkin98.workers.dev). Tim shares the private access code separately. The hosted page opens only the exact Zebra scene editor, supports real-time co-editing, Command-Z / Command-Shift-Z, Option/Alt + primary-drag orbit, and a revocable **Connect AI** workflow. AI may inspect/edit/undo/checkpoint the live room but cannot queue GitHub; validated scene-only GitHub updates stay human-confirmed and are reviewed in [pull request 1](https://github.com/Mucchun/zebra-circus-game/pull/1). No private engine checkout is required.
+**Online scene editor:** [zebra-scene-editor.timofeymarkin98.workers.dev](https://zebra-scene-editor.timofeymarkin98.workers.dev). Tim shares the private access code separately. The hosted page opens only the exact Zebra scene editor and supports real-time co-editing, Command-Z / Command-Shift-Z, Option/Alt + primary-drag orbit, Option/Alt + Command/Ctrl + primary-drag camera pan, checked-in mesh replacement, and a revocable **Connect AI** workflow. AI may discover/replace meshes and inspect/edit/undo/checkpoint the live room but cannot queue GitHub; validated scene-only GitHub updates stay human-confirmed and are reviewed in [pull request 1](https://github.com/Mucchun/zebra-circus-game/pull/1). No private engine checkout is required.
 
 Zebra pins the compatible private editor release in `game-port-studio.project.json`. For local engine work, collaborators with repository access can keep `game-port-studio` beside this repository and run:
 
@@ -40,7 +40,7 @@ This starts the game on port 8765 and prints a one-run focused editor URL on por
 
 The focused editor shows only Objects, the original Zebra viewport, Inspector, scene transforms, Undo/Redo, Play/Stop, Save and Save & Push. Edit/Play parity is exact because both modes pause and resume the same canonical `index.html` iframe, scene, canvas and WebGL context.
 
-The 222 original Zebra objects keep stable IDs, fixed hierarchy, and fixed model/primitive sources. Their transforms (including hierarchy-root transforms), visibility and authored Box Colliders are editable; the only original-source exception is switching a QR among the exact MC9400, MC3400, PS30 and TC8300 artwork family. The editor can also add persistent **Empty**, **Cube**, **Sphere**, **Cylinder**, **Capsule** and **Plane** extras with an inline untextured material and optional Box Collider. Extras support transforms, parenting, visibility, duplicate and delete, but do not automatically gain Zebra scan, pickup, balloon, scoring or HUD behavior.
+The 222 original Zebra objects keep stable IDs, fixed hierarchy and gameplay roles. The 204 originals with Mesh Renderers can replace their visual with any checked-in Zebra GLB while retaining the same target, transform and authored Box Collider; replacement does not auto-fit the model or resize collision. The 72-file model pack itself remains immutable. The editor can also add persistent **Empty**, **Cube**, **Sphere**, **Cylinder**, **Capsule** and **Plane** extras with an inline untextured material and optional Box Collider. Extras support transforms, parenting, visibility, duplicate and delete, but do not automatically gain Zebra scan, pickup, balloon, scoring or HUD behavior.
 
 ## Install as an app (PWA)
 The game ships a web-app manifest + service worker, so it's installable:
