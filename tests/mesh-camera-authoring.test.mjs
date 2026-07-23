@@ -134,6 +134,169 @@ test("Option/Alt camera gestures latch orbit and Command/Ctrl pan without author
   }
 });
 
+test("F frames the selected rendered replacement from the canvas or validated parent action without authoring state", { timeout: 90_000 }, async () => {
+  const browser = await chromium.launch({ headless: true });
+  const { page, errors, badResponses } = await openAuthoringPage(browser, "camera-frame");
+  try {
+    const replacementScene = await page.evaluate(() => {
+      const scene = structuredClone(runtimeSceneDocument);
+      const rendererComponent = scene.objects
+        .find((entry) => entry.id === "center-plinth")
+        .components.find((entry) => entry.type === "mesh-renderer");
+      rendererComponent.source = { kind: "asset", assetId: "asset-barrel" };
+      return scene;
+    });
+    await postScene(page, replacementScene, 1);
+
+    const before = await page.evaluate(() => {
+      setStudioAuthoringSelection("center-plinth");
+      const override = fixedEditableVisualOverrides.get("center-plinth");
+      if (!override?.nativeMaterials.length) throw new Error("The plinth replacement did not conceal a native mesh.");
+      // A hidden native mesh is deliberately moved far away. Raw Box3/BoxHelper
+      // includes it even though its material is invisible, so framing must use
+      // the rendered override rather than the stable target's unfiltered box.
+      override.nativeMaterials[0].mesh.position.x += 400;
+      override.nativeMaterials[0].mesh.updateWorldMatrix(true, true);
+      override.root.updateWorldMatrix(true, true);
+      const renderedBox = new THREE.Box3().setFromObject(override.root);
+      const rawTargetBox = new THREE.Box3().setFromObject(editableObjects.get("center-plinth"));
+      const center = renderedBox.getCenter(new THREE.Vector3());
+      const corners = [
+        [renderedBox.min.x, renderedBox.min.y, renderedBox.min.z],
+        [renderedBox.min.x, renderedBox.min.y, renderedBox.max.z],
+        [renderedBox.min.x, renderedBox.max.y, renderedBox.min.z],
+        [renderedBox.min.x, renderedBox.max.y, renderedBox.max.z],
+        [renderedBox.max.x, renderedBox.min.y, renderedBox.min.z],
+        [renderedBox.max.x, renderedBox.min.y, renderedBox.max.z],
+        [renderedBox.max.x, renderedBox.max.y, renderedBox.min.z],
+        [renderedBox.max.x, renderedBox.max.y, renderedBox.max.z],
+      ];
+      studioAuthoring.orbitTarget.set(-35, 24, 31);
+      studioAuthoring.orbitDistance = 70;
+      studioAuthoring.cameraView = "game";
+      updateStudioOrbitCamera();
+      renderer.domElement.tabIndex = 0;
+      renderer.domElement.focus({ preventScroll: true });
+      const snapshot = window.__zebraStudioValidation.snapshot();
+      return {
+        center: center.toArray(),
+        corners,
+        rawCenter: rawTargetBox.getCenter(new THREE.Vector3()).toArray(),
+        orbit: snapshot.orbit,
+        revision: snapshot.revision,
+        sceneDocumentHash: snapshot.sceneDocumentHash,
+        selectedObjectId: snapshot.selectedObjectId,
+        layout: JSON.stringify(layoutObject("center-plinth")),
+      };
+    });
+    assert.ok(Math.hypot(...subtract(before.rawCenter, before.center)) > 50, "the hidden-native regression fixture did not diverge from the rendered replacement");
+
+    await page.keyboard.press("f");
+    await page.waitForFunction((center) => {
+      const snapshot = window.__zebraStudioValidation.snapshot();
+      return snapshot.renderState.cameraView === "orbit"
+        && snapshot.orbit.target.every((value, index) => Math.abs(value - center[index]) < 1e-7);
+    }, before.center);
+    const afterCanvas = await page.evaluate((corners) => {
+      const snapshot = window.__zebraStudioValidation.snapshot();
+      return {
+        snapshot,
+        layout: JSON.stringify(layoutObject("center-plinth")),
+        projected: corners.map((corner) => new THREE.Vector3(...corner).project(studioAuthoring.editorCamera).toArray()),
+        selectionBox: studioAuthoring.selectionBox?.box ? {
+          min: studioAuthoring.selectionBox.box.min.toArray(),
+          max: studioAuthoring.selectionBox.box.max.toArray(),
+        } : null,
+      };
+    }, before.corners);
+    assertVectorClose(afterCanvas.snapshot.orbit.target, before.center, "canvas F orbit target");
+    assert.equal(afterCanvas.snapshot.orbit.yaw, before.orbit.yaw, "canvas F changed orbit yaw");
+    assert.equal(afterCanvas.snapshot.orbit.pitch, before.orbit.pitch, "canvas F changed orbit pitch");
+    assert.ok(afterCanvas.snapshot.orbit.distance < before.orbit.distance, "canvas F did not move close to the selected replacement");
+    assert.ok(
+      afterCanvas.projected.every(([x, y, z]) => Math.abs(x) < 0.95 && Math.abs(y) < 0.95 && z > -1 && z < 1),
+      `framed replacement falls outside the viewport: ${JSON.stringify(afterCanvas.projected)}`,
+    );
+    assert.ok(afterCanvas.selectionBox, "the rendered selection outline is missing");
+    assertVectorClose(afterCanvas.selectionBox.min, [
+      Math.min(...before.corners.map(([x]) => x)),
+      Math.min(...before.corners.map(([, y]) => y)),
+      Math.min(...before.corners.map(([, , z]) => z)),
+    ], "replacement selection outline minimum");
+    assertVectorClose(afterCanvas.selectionBox.max, [
+      Math.max(...before.corners.map(([x]) => x)),
+      Math.max(...before.corners.map(([, y]) => y)),
+      Math.max(...before.corners.map(([, , z]) => z)),
+    ], "replacement selection outline maximum");
+    assert.equal(afterCanvas.snapshot.revision, before.revision, "canvas F changed the bridge revision");
+    assert.equal(afterCanvas.snapshot.sceneDocumentHash, before.sceneDocumentHash, "canvas F changed the authored scene");
+    assert.equal(afterCanvas.snapshot.selectedObjectId, before.selectedObjectId, "canvas F changed selection");
+    assert.equal(afterCanvas.layout, before.layout, "canvas F changed the selected object");
+
+    const inputGuard = await page.evaluate(() => {
+      studioAuthoring.orbitTarget.set(23, 17, -19);
+      studioAuthoring.orbitDistance = 41;
+      updateStudioOrbitCamera();
+      const input = document.createElement("input");
+      input.id = "frame-shortcut-input-guard";
+      document.body.appendChild(input);
+      input.focus();
+      return window.__zebraStudioValidation.snapshot().orbit;
+    });
+    await page.keyboard.press("f");
+    const afterInput = await page.evaluate(() => window.__zebraStudioValidation.snapshot().orbit);
+    assertVectorClose(afterInput.target, inputGuard.target, "input-focused F target");
+    assert.equal(afterInput.distance, inputGuard.distance, "input-focused F changed distance");
+    await page.evaluate(() => document.getElementById("frame-shortcut-input-guard")?.remove());
+
+    const beforeParentAction = await page.evaluate(() => {
+      studioAuthoring.orbitTarget.set(-21, -12, 29);
+      studioAuthoring.orbitDistance = 63;
+      updateStudioOrbitCamera();
+      const snapshot = window.__zebraStudioValidation.snapshot();
+      postMessage({
+        type: "game-port-studio:editor-action",
+        protocol: RUNTIME_BRIDGE_PROTOCOL,
+        nonce: runtimeBridgeNonce,
+        revision: runtimeBridgeRevision,
+        action: "frame-selection",
+        objectId: "center-plinth",
+      }, location.origin);
+      return snapshot;
+    });
+    await page.waitForFunction((center) => window.__zebraStudioValidation.snapshot().orbit.target
+      .every((value, index) => Math.abs(value - center[index]) < 1e-7), before.center);
+    const afterParentAction = await page.evaluate(() => window.__zebraStudioValidation.snapshot());
+    assertVectorClose(afterParentAction.orbit.target, before.center, "validated parent frame target");
+    assert.equal(afterParentAction.orbit.yaw, beforeParentAction.orbit.yaw, "parent frame changed orbit yaw");
+    assert.equal(afterParentAction.orbit.pitch, beforeParentAction.orbit.pitch, "parent frame changed orbit pitch");
+    assert.equal(afterParentAction.revision, before.revision, "parent frame changed the bridge revision");
+    assert.equal(afterParentAction.sceneDocumentHash, before.sceneDocumentHash, "parent frame changed the authored scene");
+
+    const playGuard = await page.evaluate(() => {
+      studioAuthoring.orbitTarget.set(31, 11, -27);
+      studioAuthoring.orbitDistance = 52;
+      updateStudioOrbitCamera();
+      setStudioRuntimeMode("playing");
+      renderer.domElement.focus({ preventScroll: true });
+      return window.__zebraStudioValidation.snapshot().orbit;
+    });
+    await page.keyboard.press("f");
+    const afterPlayKey = await page.evaluate(() => window.__zebraStudioValidation.snapshot());
+    assert.equal(afterPlayKey.renderState.mode, "playing");
+    assertVectorClose(afterPlayKey.orbit.target, playGuard.target, "Play-mode F target");
+    assert.equal(afterPlayKey.orbit.distance, playGuard.distance, "Play-mode F changed distance");
+    assert.equal(afterPlayKey.revision, before.revision, "Play-mode F changed the bridge revision");
+    assert.equal(afterPlayKey.sceneDocumentHash, before.sceneDocumentHash, "Play-mode F changed the authored scene");
+    await page.evaluate(() => setStudioRuntimeMode("authoring"));
+
+    assert.deepEqual(errors, [], `browser errors: ${errors.join("; ")}`);
+    assert.deepEqual(badResponses, [], `HTTP errors: ${badResponses.join("; ")}`);
+  } finally {
+    await browser.close();
+  }
+});
+
 test("fixed Zebra roots swap allowlisted GLBs and primitives without changing identity or colliders", { timeout: 90_000 }, async () => {
   const browser = await chromium.launch({ headless: true });
   const { page, errors, badResponses } = await openAuthoringPage(browser, "mesh-replacement");

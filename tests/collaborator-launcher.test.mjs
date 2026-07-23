@@ -12,8 +12,8 @@ const manifest = JSON.parse(await readFile(path.join(gameRoot, "game-port-studio
 const token = "launcher_test_token_000000000000000000000000000";
 
 test("Zebra launcher enables only the focused scene repository session", () => {
-  assert.equal(manifest.engine.version, "0.18.0");
-  assert.equal(manifest.engine.testedCommit, "5f1ad5d0e4da2ce3cdc741118db1f271cd639f9e");
+  assert.equal(manifest.engine.version, "0.19.0");
+  assert.equal(manifest.engine.testedCommit, "c67ed5681ac82128ec7c89cc917185e90ee79822");
   assert.equal(manifest.collaboration.mode, "focused-scene");
   assert.equal(manifest.collaboration.repository, "Mucchun/zebra-circus-game");
   assert.equal(manifest.collaboration.remote, "origin");

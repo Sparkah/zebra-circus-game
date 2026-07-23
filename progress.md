@@ -1,6 +1,21 @@
 Original prompt: Fix the scan close movement bug, add a physical level builder with colliders, and open the game through the experimental Three.js/Unity Game Port Studio for editing.
 
-Latest prompt: Add Option/Alt + Command/Ctrl physical camera movement and let original mesh-bearing objects replace their visual mesh without changing stable identity.
+Latest prompt: Add Unity-style F framing plus a hosted project asset library whose GLBs can replace or create editable meshes.
+
+## 2026-07-23 — bounded uploaded GLBs in the exact runtime
+
+- The immutable 72-model Zebra pack can now be extended by separately named project uploads. Runtime descriptors accept only `asset-upload-` plus 48 lowercase hexadecimal characters, `model/glb`, the canonical `<id>.glb` filename, and 1 byte–8 MiB metadata.
+- A full saved scene parses canonical embedded base64. A hosted slim preview can load only the current origin's `/api/assets/<id>/content`; arbitrary descriptor URLs, external GLB URI dependencies, malformed containers and byte mismatches are rejected before scene application.
+- Uploaded GLBs work both as visual replacements on stable original targets and as dynamic extras with embedded materials. Edit/Play retains runtime identity and authored colliders; async asset preparation remains scene-generation guarded.
+- Focused browser coverage proves embedded and slim loads, dynamic creation, Play identity, superseded-request behavior, malformed/external/URL rejection and atomic retention of the last valid scene.
+
+## 2026-07-23 — replacement-aware F framing
+
+- F now switches to the Orbit camera, keeps its yaw/pitch, centers on the selected object's visible world-space geometry and calculates a padded perspective distance that fits it in the viewport.
+- Framing uses the active replacement visual instead of the concealed native mesh, and selecting an authored hierarchy root unions the rendered bounds of its visible descendants. The selection outline uses the same rendered bounds.
+- The shortcut works directly when the original Zebra iframe owns focus and through a source/origin/protocol/nonce/revision-validated parent editor action. Inputs, open dialogs, active drags and Play mode ignore it.
+- Camera framing changes no scene field, selected ID, collaboration revision or Undo/Redo state. Focused Playwright coverage deliberately moves a hidden native mesh 400 units away and proves F still frames the visible GLB replacement.
+- `GAME_PORT_STUDIO_PATH=../../Shared/experiments/game-port-studio node --test tests/*.test.mjs` passes 13/13. The reviewed `test-output/zebra-f-frame.png` shows the selected podium tightly framed with its collider and gizmo intact.
 
 ## 2026-07-22 — replaceable visuals and physical camera pan
 
@@ -26,7 +41,7 @@ Latest prompt: Add Option/Alt + Command/Ctrl physical camera movement and let or
 ## 2026-07-22 — superseded source-lock and current dynamic-extra contract
 
 - Exact visual/runtime parity applies only to the persistent original Zebra `index.html` Edit/Play path. It retains one iframe, scene, canvas and WebGL context and compares byte-identical game-camera pixels. Generated Three.js/Unity outputs are portability builds for the scene, exact asset bytes, stable IDs, supported materials and components; they do not contain the complete Zebra gameplay/HUD and do not claim pixel parity.
-- At this milestone all 222 required original objects retained stable runtime IDs, fixed parent links and fixed source definitions. The v0.18 work above supersedes only that source restriction: the stable runtime target remains protected, while its Mesh Renderer may now select another checked-in Zebra GLB. Required originals still cannot be reparented, deleted, duplicated as replacements or redirected to arbitrary URLs.
+- At this milestone all 222 required original objects retained stable runtime IDs, fixed parent links and fixed source definitions. The v0.19 work above supersedes only that source restriction: the stable runtime target remains protected, while its Mesh Renderer may now select another checked-in Zebra GLB or a validated project upload. Required originals still cannot be reparented, deleted, duplicated as replacements or redirected to arbitrary URLs.
 - Supported persistent extras are Empty, Cube, Sphere, Cylinder, Capsule and Plane. Extras accept an inline untextured material and optional Box Collider and support transforms, parenting, visibility, duplicate and delete. They render through the same persistent Zebra Edit/Play runtime and export to portable targets, but do not acquire Zebra-specific scan/pickup/balloon/scoring/HUD behavior automatically.
 - The former 23-object proxy and 24-asset SceneView milestones below are historical and superseded. They are preserved to explain the correction, not as current parity or asset-count claims.
 
