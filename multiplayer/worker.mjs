@@ -22,6 +22,15 @@ const WORLD_BOUND_Y_MAX = 20;
 const MAX_SPEED_UNITS_PER_SEC = 20; // player walks at 6; generous for lag bursts
 const MIN_STATE_INTERVAL_MS = 25; // hard inbound cap ~40Hz per connection
 
+const BALLOON_SLOTS = 28;
+const BALLOON_RESPAWN_MS = 10_000;
+const POP_COOLDOWN_MS = 120;
+const EMOTE_COOLDOWN_MS = 800;
+const EMOTE_KINDS = 4;
+const POP_RANGE = 60; // whole-arena generosity; the real arbiter is gen + cooldown
+const WEAPON_POINTS = { MC9400: 10, MC3400: 5, PS30: 15, TC8300: 20 };
+const DEFAULT_POP_POINTS = 5;
+
 const DEFAULT_ALLOWED_ORIGIN_SUFFIXES = [
   "zebra-circus-game.vercel.app",
   "zebra-scene-editor.timofeymarkin98.workers.dev",
@@ -126,11 +135,38 @@ export class ZebraPlazaRoom {
     this.ctx = ctx;
     this.lastFlush = 0;
     // In-memory only. After hibernation the constructor reruns; rebuild the
-    // roster from the socket attachments that survived it.
+    // roster from the socket attachments that survived it. Balloon state is
+    // deliberately ephemeral: an evicted empty room resets to a full pool.
     this.players = new Map();
+    this.balloons = Array.from({ length: BALLOON_SLOTS }, () => ({ gen: 1, alive: true, respawnAt: 0, pos: null }));
     for (const socket of this.ctx.getWebSockets()) {
       const attached = socket.deserializeAttachment();
       if (attached?.id) this.players.set(attached.id, { ...attached, socket });
+    }
+  }
+
+  scoresByPlayer() {
+    const scores = {};
+    for (const socket of this.ctx.getWebSockets()) {
+      const player = this.playerForSocket(socket);
+      if (player?.hello) scores[player.id] = player.score ?? 0;
+    }
+    return scores;
+  }
+
+  balloonSummary() {
+    return this.balloons.map((balloon, slot) => [slot, balloon.gen, balloon.alive ? 1 : 0]);
+  }
+
+  processRespawns(now) {
+    for (let slot = 0; slot < this.balloons.length; slot += 1) {
+      const balloon = this.balloons[slot];
+      if (!balloon.alive && balloon.respawnAt && now >= balloon.respawnAt) {
+        balloon.alive = true;
+        balloon.gen += 1;
+        balloon.respawnAt = 0;
+        this.broadcastExcept(null, { type: "balloon", slot, gen: balloon.gen, alive: true });
+      }
     }
   }
 
@@ -155,6 +191,7 @@ export class ZebraPlazaRoom {
   async fetch(request) {
     const url = new URL(request.url);
     this.sweepStaleSockets(Date.now());
+    this.processRespawns(Date.now());
     if (url.pathname === "/occupancy") {
       return Response.json({ players: this.playerCount() });
     }
@@ -176,7 +213,10 @@ export class ZebraPlazaRoom {
       yaw: 0,
       pitch: 0,
       seq: 0,
+      score: 0,
       lastStateAt: 0,
+      lastPopAt: 0,
+      lastEmoteAt: 0,
       lastSeenAt: Date.now(),
       hello: false,
     };
@@ -224,6 +264,7 @@ export class ZebraPlazaRoom {
       player.x = spawn.x;
       player.z = spawn.z;
       socket.serializeAttachment(this.attachmentFor(player));
+      this.processRespawns(now);
       this.send(socket, {
         type: "welcome",
         id: player.id,
@@ -231,6 +272,8 @@ export class ZebraPlazaRoom {
         serverTime: now,
         spawn,
         players: this.rosterExcept(player.id),
+        balloons: this.balloonSummary(),
+        scores: this.scoresByPlayer(),
       });
       this.broadcastExcept(player.id, {
         type: "join",
@@ -266,7 +309,51 @@ export class ZebraPlazaRoom {
       this.flushSnapshots(now);
       return;
     }
+    if (message.type === "pop" && player.hello) {
+      if (now - player.lastPopAt < POP_COOLDOWN_MS) return;
+      const slot = finiteOrNull(message.slot);
+      const gen = finiteOrNull(message.gen);
+      if (slot === null || gen === null || !Number.isInteger(slot) || slot < 0 || slot >= BALLOON_SLOTS) return;
+      const balloon = this.balloons[slot];
+      if (!balloon.alive || balloon.gen !== gen) return; // lost the race or stale claim
+      const bx = finiteOrNull(message.x);
+      const by = finiteOrNull(message.y);
+      const bz = finiteOrNull(message.z);
+      if (bx === null || by === null || bz === null) return;
+      if (Math.abs(bx) > WORLD_BOUND_XZ || Math.abs(bz) > WORLD_BOUND_XZ) return;
+      // First claim per slot records the scene-authored position; later claims
+      // must agree with it and come from a player actually in the arena.
+      if (balloon.pos && Math.hypot(bx - balloon.pos[0], by - balloon.pos[1], bz - balloon.pos[2]) > 2) return;
+      if (Math.hypot(bx - player.x, bz - player.z) > POP_RANGE) return;
+      if (!balloon.pos) balloon.pos = [bx, by, bz];
+      balloon.alive = false;
+      balloon.respawnAt = now + BALLOON_RESPAWN_MS;
+      player.lastPopAt = now;
+      const points = WEAPON_POINTS[String(message.weapon)] ?? DEFAULT_POP_POINTS;
+      player.score = (player.score ?? 0) + points;
+      socket.serializeAttachment(this.attachmentFor(player));
+      this.broadcastExcept(null, {
+        type: "balloon",
+        slot,
+        gen: balloon.gen,
+        alive: false,
+        by: player.id,
+        pts: points,
+        scores: this.scoresByPlayer(),
+      });
+      this.flushSnapshots(now);
+      return;
+    }
+    if (message.type === "emote" && player.hello) {
+      if (now - player.lastEmoteAt < EMOTE_COOLDOWN_MS) return;
+      const kind = finiteOrNull(message.kind);
+      if (kind === null || !Number.isInteger(kind) || kind < 0 || kind >= EMOTE_KINDS) return;
+      player.lastEmoteAt = now;
+      this.broadcastExcept(player.id, { type: "emote", id: player.id, kind });
+      return;
+    }
     if (message.type === "ping") {
+      this.processRespawns(now);
       this.send(socket, { type: "pong", t: finiteOrNull(message.t) ?? 0, serverTime: now });
       this.flushSnapshots(now);
     }
@@ -345,6 +432,7 @@ export class ZebraPlazaRoom {
   flushSnapshots(now) {
     if (now - this.lastFlush < SNAPSHOT_INTERVAL_MS) return;
     this.lastFlush = now;
+    this.processRespawns(now);
     const sockets = this.ctx.getWebSockets();
     if (sockets.length < 2) return;
     this.sweepStaleSockets(now);

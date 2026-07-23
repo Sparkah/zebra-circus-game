@@ -2,10 +2,12 @@
 
 Opt-in real-time presence for the game: players who open the game with
 `?mp=1` join a shared room, see each other as crowd-model avatars with name
-tags, and walk the same arena. Movement is client-authoritative with server
-sanity checks (bounds, speed cap, sequence numbers); the room is authoritative
-for presence and identity. Phase 3 (shared balloon pool, scores, emotes) is
-not built yet.
+tags, walk the same arena, compete over one shared balloon pool with a live
+scoreboard, and send emotes (G/H/J/K). Movement is client-authoritative with
+server sanity checks (bounds, speed cap, sequence numbers); the room is
+authoritative for presence, identity, the balloon pool (pop arbitration +
+10s respawns) and scores. QR-scan bonuses stay personal, on top of the
+shared score.
 
 ## Pieces
 
@@ -34,14 +36,22 @@ Query parameters:
 ## Protocol (JSON over WebSocket)
 
 Client to server: `hello {name}`, `state {seq,x,y,z,yaw,pitch}` (max ~12Hz,
-server drops >40Hz), `ping {t}`.
-Server to client: `welcome {id,spawn,players,serverTime}`,
+server drops >40Hz), `pop {slot,gen,x,y,z,weapon}` (120ms cooldown),
+`emote {kind 0-3}` (800ms cooldown), `ping {t}`.
+Server to client: `welcome {id,spawn,players,balloons:[[slot,gen,alive]],scores,serverTime}`,
 `join {player}`, `leave {id}`, `snapshot {t, players:[[id,x,y,z,yaw,pitch]]}`,
+`balloon {slot,gen,alive,by?,pts?,scores?}`, `emote {id,kind}`,
 `pong {t,serverTime}`.
+
+Pop arbitration: first valid claim per (slot, generation) wins; the first
+claim records the scene-authored balloon position and later claims must
+agree with it (2 units) and come from a player inside the arena (60 units).
+Points by weapon: MC9400 10, MC3400 5, PS30 15, TC8300 20, default 5.
 
 Server rejections (silent drops): non-finite numbers, positions outside
 |x|,|z| <= 60 or y outside [-5,20], displacement over 20 units/s, stale or
-repeated sequence numbers, names over 24 chars (clamped), frames over 4KB.
+repeated sequence numbers, stale balloon generations, cooldown violations,
+invalid emote kinds, names over 24 chars (clamped), frames over 4KB.
 
 ## Deploy and test
 

@@ -3954,6 +3954,7 @@ function respawnBalloon(bo) {
 
 function popBalloon(bo, weapon) {
   if (!bo.alive) return;
+  if (MP.enabled) MP.onLocalPop(bo, weapon);
   bo.alive = false;
   bo.mesh.userData.runtimeStateVisible = false;
   bo.mesh.visible = false;
@@ -3979,7 +3980,8 @@ function popBalloon(bo, weapon) {
   // Floating score text (DOM)
   showFloatingScore(weapon.pts);
 
-  setTimeout(() => { if(gameActive) respawnBalloon(bo); }, 3500+Math.random()*2000);
+  // In multiplayer the room owns the shared balloon pool and its respawns.
+  setTimeout(() => { if(gameActive && !(MP.enabled && MP.connected())) respawnBalloon(bo); }, 3500+Math.random()*2000);
 }
 
 // Green "+" targeting reticle with corner brackets — like a barcode scanner locking on.
@@ -4482,6 +4484,7 @@ function scanQR(qObj) {
   if(!qObj.scanned){
     qObj.scanned=true;
     addScore(50);
+    if (MP.enabled) MP.noteLocalBonus(50); // QR bonus is personal, not part of the shared plaza score
     addKillFeed('QR SCANNED: '+w.name+' +50pts!');
   }
 }
@@ -4847,10 +4850,21 @@ const MP = (() => {
 
   let started = false, socket = null, selfId = null, room = null;
   let timeOffset = 0, seq = 0, lastSendAt = 0, lastHeartbeatAt = 0, retries = 0, disabledAfterErrors = false;
+  let emoteKeysBound = false, lastEmoteSentAt = 0;
   const lastSent = { x: NaN, y: NaN, z: NaN, yaw: NaN, pitch: NaN };
   const remotes = new Map();
   const avatarFiles = ['char1', 'char2', 'char4', 'char6', 'man', 'worker'];
   const avatarCache = new Map();
+  const balloonGens = Array.from({ length: 28 }, () => 1);
+  const playerNames = new Map();
+  let serverScores = {};
+  const EMOTES = ['\u{1F44B}', '❤️', '\u{1F602}', '\u{1F3AF}']; // wave, heart, laugh, target
+  const EMOTE_KEYS = { KeyG: 0, KeyH: 1, KeyJ: 2, KeyK: 3 };
+  const emoteTextureCache = new Map();
+
+  function isConnected() {
+    return !!socket && socket.readyState === 1 && !!selfId;
+  }
 
   function loadAvatarTemplate(file) {
     if (!avatarCache.has(file)) {
@@ -4887,6 +4901,7 @@ const MP = (() => {
 
   function addRemote(p) {
     if (!p || p.id === selfId || remotes.has(p.id)) return;
+    playerNames.set(p.id, p.name || 'Guest');
     const root = new THREE.Group();
     root.position.set(p.x, (p.y ?? 1.7) - 1.7, p.z);
     root.rotation.y = p.yaw ?? 0;
@@ -4918,6 +4933,148 @@ const MP = (() => {
     for (const id of [...remotes.keys()]) removeRemote(id);
   }
 
+  /* ── shared balloon pool ── */
+
+  function slotForBalloon(bo) {
+    const slot = Number(String(bo.editorId || '').slice(-2));
+    return Number.isInteger(slot) && slot >= 0 && slot < 28 ? slot : null;
+  }
+
+  function onLocalPop(bo, weapon) {
+    if (!isConnected() || applyingRemotePop) return;
+    const slot = slotForBalloon(bo);
+    if (slot === null) return;
+    const pos = bo.mesh.position;
+    socket.send(JSON.stringify({ type: 'pop', slot, gen: balloonGens[slot], x: pos.x, y: pos.y, z: pos.z, weapon: weapon && weapon.id }));
+  }
+
+  let applyingRemotePop = false;
+
+  function applyRemotePop(slot) {
+    const bo = balloons[slot];
+    if (!bo || !bo.alive) return;
+    applyingRemotePop = true;
+    popBalloon(bo, WEAPONS[0]); // full pop visuals; no local score (callers add score, not popBalloon)
+    applyingRemotePop = false;
+  }
+
+  function quietKillBalloon(slot) {
+    // Late-join reconcile: mark already-popped balloons without effects.
+    const bo = balloons[slot];
+    if (!bo || !bo.alive) return;
+    bo.alive = false;
+    bo.mesh.visible = false;
+    bo.mesh.userData.runtimeStateVisible = false;
+  }
+
+  let localScoreBonus = 0; // personal awards (QR scans) kept on top of the shared score
+
+  function reconcileScores(scores) {
+    if (!scores) return;
+    serverScores = scores;
+    const serverPart = serverScores[selfId];
+    if (typeof serverPart === 'number') {
+      const target = serverPart + localScoreBonus;
+      if (target > score) {
+        addScore(target - score); // keeps HUD, progress bar and milestone behavior
+      } else if (target < score) {
+        score = target;
+        document.getElementById('score-value').textContent = score;
+        document.getElementById('progress-fill').style.width = Math.min(100, score / WIN_SCORE * 100) + '%';
+      }
+    }
+    updateScoreboard();
+  }
+
+  /* ── floating scoreboard ── */
+
+  function ensureScoreboard() {
+    let panel = document.getElementById('mp-scoreboard');
+    if (panel) return panel;
+    panel = document.createElement('div');
+    panel.id = 'mp-scoreboard';
+    panel.style.cssText = 'position:fixed;top:96px;right:16px;z-index:11;min-width:150px;padding:8px 10px;background:rgba(5,12,8,0.72);border:1px solid rgba(185,255,119,0.4);color:#dfffc8;font:600 12px/1.6 "Barlow Condensed",Arial,sans-serif;letter-spacing:0.06em;pointer-events:none;';
+    document.body.appendChild(panel);
+    return panel;
+  }
+
+  function updateScoreboard() {
+    if (!isConnected()) return;
+    const panel = ensureScoreboard();
+    const rows = Object.entries(serverScores)
+      .map(([id, value]) => ({ id, value, name: playerNames.get(id) || 'Guest' }))
+      .sort((a, b) => b.value - a.value)
+      .slice(0, 8);
+    panel.innerHTML = '<div style="color:#b9ff77;font-size:11px;">PLAZA SCORES</div>' + rows
+      .map((row) => `<div>${row.id === selfId ? '▸ ' : ''}${escapeMpText(row.name)} · ${row.value}</div>`)
+      .join('');
+  }
+
+  function hideScoreboard() {
+    const panel = document.getElementById('mp-scoreboard');
+    if (panel) panel.remove();
+  }
+
+  function escapeMpText(text) {
+    return String(text).replace(/[&<>"']/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch]));
+  }
+
+  /* ── emotes ── */
+
+  function emoteTexture(kind) {
+    if (!emoteTextureCache.has(kind)) {
+      const canvas = document.createElement('canvas');
+      canvas.width = 128; canvas.height = 128;
+      const ctx = canvas.getContext('2d');
+      ctx.font = '96px "Apple Color Emoji", "Segoe UI Emoji", sans-serif';
+      ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.fillText(EMOTES[kind], 64, 72);
+      const texture = new THREE.CanvasTexture(canvas);
+      texture.minFilter = THREE.LinearFilter;
+      emoteTextureCache.set(kind, texture);
+    }
+    return emoteTextureCache.get(kind);
+  }
+
+  function showRemoteEmote(id, kind) {
+    const remote = remotes.get(id);
+    if (!remote || kind < 0 || kind >= EMOTES.length) return;
+    if (remote.emote) remote.root.remove(remote.emote.sprite);
+    const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: emoteTexture(kind), transparent: true, depthWrite: false }));
+    sprite.scale.set(0.6, 0.6, 1);
+    sprite.position.y = 2.35;
+    remote.root.add(sprite);
+    remote.emote = { sprite, life: 1.4 };
+  }
+
+  function showSelfEmote(kind) {
+    let toast = document.getElementById('mp-emote-toast');
+    if (!toast) {
+      toast = document.createElement('div');
+      toast.id = 'mp-emote-toast';
+      toast.style.cssText = 'position:fixed;bottom:120px;left:50%;transform:translateX(-50%);z-index:12;font-size:44px;pointer-events:none;transition:opacity 0.5s;';
+      document.body.appendChild(toast);
+    }
+    toast.textContent = EMOTES[kind];
+    toast.style.opacity = '1';
+    clearTimeout(toast._fade);
+    toast._fade = setTimeout(() => { toast.style.opacity = '0'; }, 800);
+  }
+
+  function bindEmoteKeys() {
+    if (emoteKeysBound) return;
+    emoteKeysBound = true;
+    document.addEventListener('keydown', (event) => {
+      const kind = EMOTE_KEYS[event.code];
+      if (kind === undefined || !isConnected() || !gameActive || infoOpen) return;
+      const now = performance.now();
+      if (now - lastEmoteSentAt < 900) return;
+      lastEmoteSentAt = now;
+      socket.send(JSON.stringify({ type: 'emote', kind }));
+      showSelfEmote(kind);
+    });
+  }
+
   function handleMessage(message) {
     if (message.type === 'welcome') {
       selfId = message.id;
@@ -4929,11 +5086,45 @@ const MP = (() => {
         camera.position.x = message.spawn.x;
         camera.position.z = message.spawn.z;
       }
+      playerNames.set(selfId, displayName);
       (message.players || []).forEach(addRemote);
+      // Adopt the room's shared balloon pool: kill already-popped slots quietly.
+      for (const [slot, gen, alive] of message.balloons || []) {
+        if (slot >= 0 && slot < balloonGens.length) {
+          balloonGens[slot] = gen;
+          if (!alive) quietKillBalloon(slot);
+        }
+      }
+      reconcileScores(message.scores || {});
       return;
     }
-    if (message.type === 'join') { addRemote(message.player); return; }
-    if (message.type === 'leave') { removeRemote(message.id); return; }
+    if (message.type === 'join') {
+      if (message.player) playerNames.set(message.player.id, message.player.name || 'Guest');
+      addRemote(message.player);
+      updateScoreboard();
+      return;
+    }
+    if (message.type === 'leave') {
+      removeRemote(message.id);
+      playerNames.delete(message.id);
+      delete serverScores[message.id];
+      updateScoreboard();
+      return;
+    }
+    if (message.type === 'balloon') {
+      const slot = message.slot;
+      if (!(slot >= 0 && slot < balloonGens.length)) return;
+      balloonGens[slot] = message.gen;
+      if (message.alive) {
+        const bo = balloons[slot];
+        if (bo && !bo.alive) respawnBalloon(bo);
+      } else if (message.by !== selfId) {
+        applyRemotePop(slot);
+      }
+      if (message.scores) reconcileScores(message.scores);
+      return;
+    }
+    if (message.type === 'emote') { showRemoteEmote(message.id, message.kind); return; }
     if (message.type === 'snapshot') {
       for (const [id, x, y, z, rowYaw] of message.players) {
         if (id === selfId) continue;
@@ -4958,6 +5149,12 @@ const MP = (() => {
       socket.addEventListener('close', () => {
         clearRemotes();
         selfId = null;
+        hideScoreboard();
+        // Back to solo: revive any balloons the room had marked popped so the
+        // offline game is never left with permanent holes in the pool.
+        for (const bo of balloons) {
+          if (!bo.alive) respawnBalloon(bo);
+        }
         if (!disabledAfterErrors && retries < 3) {
           retries += 1;
           setTimeout(() => { if (started) connect(); }, 2000 * retries);
@@ -5040,16 +5237,29 @@ const MP = (() => {
       } else {
         root.position.y = targetY;
       }
+      if (remote.emote) {
+        remote.emote.life -= delta;
+        remote.emote.sprite.position.y += delta * 0.35;
+        remote.emote.sprite.material.opacity = Math.min(1, remote.emote.life / 0.5);
+        if (remote.emote.life <= 0) {
+          remote.root.remove(remote.emote.sprite);
+          remote.emote = null;
+        }
+      }
     }
   }
 
   return {
     enabled,
+    connected: isConnected,
+    onLocalPop,
+    noteLocalBonus(pts) { if (isConnected()) localScoreBonus += pts; },
     tick(delta) {
       if (disabledAfterErrors) return;
       if (!started) {
         if (!gameActive) return;
         started = true;
+        bindEmoteKeys();
         connect();
         return;
       }
@@ -5057,15 +5267,32 @@ const MP = (() => {
       animateRemotes(delta);
     },
     debug() {
+      const balloonScreens = [];
+      for (const bo of balloons) {
+        if (!bo.alive || balloonScreens.length >= 3) continue;
+        const projected = bo.mesh.position.clone().project(camera);
+        if (projected.z < 1 && Math.abs(projected.x) < 0.92 && Math.abs(projected.y) < 0.92) {
+          balloonScreens.push({
+            slot: slotForBalloon(bo),
+            sx: Math.round((projected.x * 0.5 + 0.5) * window.innerWidth),
+            sy: Math.round((-projected.y * 0.5 + 0.5) * window.innerHeight),
+          });
+        }
+      }
       return {
-        room, selfId, connected: !!socket && socket.readyState === 1,
+        room, selfId, connected: isConnected(),
+        balloonsAlive: balloons.filter((bo) => bo.alive).length,
+        scores: { ...serverScores },
+        names: Object.fromEntries(playerNames),
+        balloonScreens,
+        pickups: weaponObjs.map((o, index) => ({ index, x: o.mesh.position.x, z: o.mesh.position.z, collected: !!o.collected })),
         remotes: [...remotes.entries()].map(([id, remote]) => {
           let modelHeight = 0;
           if (remote.model) {
             const size = new THREE.Box3().setFromObject(remote.model).getSize(new THREE.Vector3());
             modelHeight = Math.round(size.y * 100) / 100;
           }
-          return { id, x: remote.root.position.x, y: remote.root.position.y, z: remote.root.position.z, buffered: remote.buf.length, hasModel: !!remote.model, modelHeight };
+          return { id, x: remote.root.position.x, y: remote.root.position.y, z: remote.root.position.z, buffered: remote.buf.length, hasModel: !!remote.model, modelHeight, emoting: !!remote.emote };
         }),
       };
     },
