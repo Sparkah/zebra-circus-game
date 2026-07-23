@@ -2,6 +2,8 @@ Original prompt: Fix the scan close movement bug, add a physical level builder w
 
 Latest prompt: Add Unity-style F framing plus a hosted project asset library whose GLBs can replace or create editable meshes.
 
+- Zebra now pins the private Game Port Studio v0.19.1 free-tier-guarded release (`eb871a29adfa0055c8d364bf2cdfad3e6a91c5fa`). The hosted asset path uses a dedicated private Standard R2 bucket with fixed storage/operation accounting and a fail-closed predeploy check.
+
 ## 2026-07-23 — bounded uploaded GLBs in the exact runtime
 
 - The immutable 72-model Zebra pack can now be extended by separately named project uploads. Runtime descriptors accept only `asset-upload-` plus 48 lowercase hexadecimal characters, `model/glb`, the canonical `<id>.glb` filename, and 1 byte–8 MiB metadata.
