@@ -4573,6 +4573,9 @@ function updateGame(delta, t) {
   // Player move
   if((isLocked || pointerLockFallback) && gameActive && !infoOpen) movePlayer(delta);
 
+  // Multiplayer shared plaza (?mp=1) - full implementation at the end of this script.
+  if (MP.enabled) MP.tick(delta, t);
+
   // Auto-fire for rapid weapon
   if(mouseDown && gameActive && !infoOpen && currentWeapon>=0 && WEAPONS[currentWeapon].effect==='rapid') {
     shoot();
@@ -4817,6 +4820,258 @@ window.advanceTime = (milliseconds) => {
   renderer.render(scene, camera);
   return boundedMilliseconds;
 };
+
+/* ── MULTIPLAYER: shared plaza (opt-in via ?mp=1) ─────────────────────────
+   Client-authoritative movement, server-arbitrated presence. The room relay
+   is multiplayer/worker.mjs (Cloudflare Durable Object). Remote players are
+   cloned crowd models with a name sprite; transforms interpolate between the
+   two snapshots straddling render time (150ms delay, bounded extrapolation).
+   Never active inside the Studio editor (STUDIO_AUTHORING_MODE). */
+const MP = (() => {
+  const params = new URLSearchParams(location.search);
+  const enabled = params.get('mp') === '1' && !STUDIO_AUTHORING_MODE && !window._silent;
+  const INTERP_DELAY_MS = 150;
+  const MAX_EXTRAPOLATE_MS = 120;
+  const SEND_INTERVAL_MS = 83; // ~12Hz
+  const HEARTBEAT_MS = 1000;
+  const SNAP_DISTANCE = 3;
+  const defaultBase = 'wss://zebra-circus-mp.timofeymarkin98.workers.dev';
+  const wsBase = (params.get('mpUrl') || defaultBase).replace(/\/$/, '');
+  const httpBase = wsBase.replace(/^ws/, 'http');
+  let requestedRoom = params.get('mpRoom') || '';
+  let displayName = params.get('mpName') || '';
+  if (!displayName) {
+    try { displayName = localStorage.getItem('zebraPlayerName') || ''; } catch (err) {}
+  }
+  if (!displayName) displayName = 'Zebra ' + Math.floor(100 + Math.random() * 900);
+
+  let started = false, socket = null, selfId = null, room = null;
+  let timeOffset = 0, seq = 0, lastSendAt = 0, lastHeartbeatAt = 0, retries = 0, disabledAfterErrors = false;
+  const lastSent = { x: NaN, y: NaN, z: NaN, yaw: NaN, pitch: NaN };
+  const remotes = new Map();
+  const avatarFiles = ['char1', 'char2', 'char4', 'char6', 'man', 'worker'];
+  const avatarCache = new Map();
+
+  function loadAvatarTemplate(file) {
+    if (!avatarCache.has(file)) {
+      avatarCache.set(file, new Promise((resolve) => {
+        new THREE.GLTFLoader().load(`models/crowd/${file}.glb`, (gltf) => resolve(gltf.scene), undefined, () => resolve(null));
+      }));
+    }
+    return avatarCache.get(file);
+  }
+
+  function nameSprite(text) {
+    const canvas = document.createElement('canvas');
+    canvas.width = 256; canvas.height = 64;
+    const ctx = canvas.getContext('2d');
+    ctx.font = '600 30px "Source Sans 3", Arial, sans-serif';
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillStyle = 'rgba(5,12,8,0.72)';
+    const w = Math.min(240, ctx.measureText(text).width + 28);
+    ctx.fillRect(128 - w / 2, 8, w, 48);
+    ctx.fillStyle = '#dfffc8';
+    ctx.fillText(text, 128, 34, 224);
+    const texture = new THREE.CanvasTexture(canvas);
+    texture.minFilter = THREE.LinearFilter;
+    const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: texture, transparent: true, depthWrite: false }));
+    sprite.scale.set(1.15, 0.29, 1);
+    return sprite;
+  }
+
+  function avatarIndexFor(id) {
+    let hash = 0;
+    for (let i = 0; i < id.length; i++) hash = (hash * 31 + id.charCodeAt(i)) >>> 0;
+    return hash % avatarFiles.length;
+  }
+
+  function addRemote(p) {
+    if (!p || p.id === selfId || remotes.has(p.id)) return;
+    const root = new THREE.Group();
+    root.position.set(p.x, (p.y ?? 1.7) - 1.7, p.z);
+    root.rotation.y = p.yaw ?? 0;
+    const label = nameSprite(p.name || 'Guest');
+    label.position.y = 2.05;
+    root.add(label);
+    scene.add(root);
+    const remote = { root, model: null, buf: [{ t: Date.now(), x: p.x, y: p.y ?? 1.7, z: p.z, yaw: p.yaw ?? 0 }], walkPhase: 0, lastX: p.x, lastZ: p.z };
+    remotes.set(p.id, remote);
+    loadAvatarTemplate(avatarFiles[avatarIndexFor(p.id)]).then((template) => {
+      if (!template || !remotes.has(p.id)) return;
+      const model = template.clone(true);
+      const box = new THREE.Box3().setFromObject(model);
+      const h = box.getSize(new THREE.Vector3()).y;
+      if (h > 0) model.scale.setScalar(1.65 / h);
+      remote.model = model;
+      root.add(model);
+    });
+  }
+
+  function removeRemote(id) {
+    const remote = remotes.get(id);
+    if (!remote) return;
+    scene.remove(remote.root);
+    remotes.delete(id);
+  }
+
+  function clearRemotes() {
+    for (const id of [...remotes.keys()]) removeRemote(id);
+  }
+
+  function handleMessage(message) {
+    if (message.type === 'welcome') {
+      selfId = message.id;
+      timeOffset = message.serverTime - Date.now();
+      retries = 0;
+      // Take the server's spawn slot so simultaneous joiners never stand
+      // fused inside one another at the shared player start.
+      if (message.spawn && Number.isFinite(message.spawn.x) && Number.isFinite(message.spawn.z)) {
+        camera.position.x = message.spawn.x;
+        camera.position.z = message.spawn.z;
+      }
+      (message.players || []).forEach(addRemote);
+      return;
+    }
+    if (message.type === 'join') { addRemote(message.player); return; }
+    if (message.type === 'leave') { removeRemote(message.id); return; }
+    if (message.type === 'snapshot') {
+      for (const [id, x, y, z, rowYaw] of message.players) {
+        if (id === selfId) continue;
+        const remote = remotes.get(id);
+        if (!remote) continue;
+        remote.buf.push({ t: message.t, x, y, z, yaw: rowYaw });
+        if (remote.buf.length > 24) remote.buf.splice(0, remote.buf.length - 24);
+      }
+    }
+  }
+
+  function connect() {
+    let joinTarget = requestedRoom ? `${httpBase}/join?room=${encodeURIComponent(requestedRoom)}` : `${httpBase}/join`;
+    fetch(joinTarget).then((r) => r.json()).then((assignment) => {
+      if (!assignment.room) throw new Error(assignment.error || 'no room');
+      room = assignment.room;
+      socket = new WebSocket(`${wsBase}/room/${room}/ws`);
+      socket.addEventListener('open', () => socket.send(JSON.stringify({ type: 'hello', name: displayName })));
+      socket.addEventListener('message', (event) => {
+        try { handleMessage(JSON.parse(event.data)); } catch (err) {}
+      });
+      socket.addEventListener('close', () => {
+        clearRemotes();
+        selfId = null;
+        if (!disabledAfterErrors && retries < 3) {
+          retries += 1;
+          setTimeout(() => { if (started) connect(); }, 2000 * retries);
+        } else {
+          disabledAfterErrors = true; // silent solo fallback
+        }
+      });
+    }).catch(() => {
+      if (retries < 3) { retries += 1; setTimeout(() => { if (started) connect(); }, 2000 * retries); }
+      else disabledAfterErrors = true;
+    });
+  }
+
+  function maybeSend() {
+    if (!socket || socket.readyState !== 1 || !selfId) return;
+    const now = performance.now();
+    if (now - lastSendAt < SEND_INTERVAL_MS) return;
+    const px = camera.position.x, py = camera.position.y, pz = camera.position.z;
+    const moved = Math.hypot(px - lastSent.x, py - lastSent.y, pz - lastSent.z) > 0.02
+      || Math.abs(yaw - lastSent.yaw) > 0.01 || Math.abs(pitch - lastSent.pitch) > 0.01
+      || !Number.isFinite(lastSent.x);
+    if (!moved && now - lastHeartbeatAt < HEARTBEAT_MS) return;
+    lastSendAt = now; lastHeartbeatAt = now;
+    lastSent.x = px; lastSent.y = py; lastSent.z = pz; lastSent.yaw = yaw; lastSent.pitch = pitch;
+    seq += 1;
+    socket.send(JSON.stringify({ type: 'state', seq, x: px, y: py, z: pz, yaw, pitch }));
+  }
+
+  function lerpAngle(a, b, alpha) {
+    let diff = (b - a) % (Math.PI * 2);
+    if (diff > Math.PI) diff -= Math.PI * 2;
+    if (diff < -Math.PI) diff += Math.PI * 2;
+    return a + diff * alpha;
+  }
+
+  function animateRemotes(delta) {
+    const renderTime = Date.now() + timeOffset - INTERP_DELAY_MS;
+    for (const remote of remotes.values()) {
+      const buf = remote.buf;
+      if (!buf.length) continue;
+      let target;
+      if (buf.length === 1 || renderTime <= buf[0].t) {
+        target = buf[0];
+      } else {
+        let after = buf.length - 1;
+        for (let i = 1; i < buf.length; i++) { if (buf[i].t >= renderTime) { after = i; break; } }
+        const b = buf[after], a = buf[after - 1] || b;
+        if (renderTime > b.t) {
+          // Newest sample is older than render time: bounded extrapolation.
+          const overshoot = Math.min(renderTime - b.t, MAX_EXTRAPOLATE_MS);
+          const span = Math.max(b.t - a.t, 1);
+          const k = overshoot / span;
+          target = { x: b.x + (b.x - a.x) * k, y: b.y + (b.y - a.y) * k, z: b.z + (b.z - a.z) * k, yaw: b.yaw };
+        } else {
+          const alpha = Math.min(1, Math.max(0, (renderTime - a.t) / Math.max(b.t - a.t, 1)));
+          target = { x: a.x + (b.x - a.x) * alpha, y: a.y + (b.y - a.y) * alpha, z: a.z + (b.z - a.z) * alpha, yaw: lerpAngle(a.yaw, b.yaw, alpha) };
+        }
+        if (buf.length > 4 && buf[1].t < renderTime - 800) buf.splice(0, buf.length - 4);
+      }
+      const root = remote.root;
+      const targetX = target.x, targetZ = target.z, targetY = target.y - 1.7;
+      if (Math.hypot(targetX - root.position.x, targetZ - root.position.z) > SNAP_DISTANCE) {
+        root.position.set(targetX, targetY, targetZ);
+      } else {
+        root.position.x = targetX; root.position.z = targetZ;
+      }
+      root.rotation.y = lerpAngle(root.rotation.y, target.yaw, Math.min(1, delta * 12));
+      const speed = Math.hypot(targetX - remote.lastX, targetZ - remote.lastZ) / Math.max(delta, 0.016);
+      remote.lastX = targetX; remote.lastZ = targetZ;
+      if (remote.model) {
+        if (speed > 0.4) {
+          remote.walkPhase += delta * Math.min(speed, 7) * 2.2;
+          remote.model.position.y = targetY - root.position.y + Math.abs(Math.sin(remote.walkPhase)) * 0.06;
+          remote.model.rotation.z = Math.sin(remote.walkPhase) * 0.045;
+        } else {
+          remote.model.position.y += (targetY - root.position.y - remote.model.position.y) * Math.min(1, delta * 10);
+          remote.model.rotation.z *= Math.max(0, 1 - delta * 8);
+          root.position.y = targetY;
+        }
+      } else {
+        root.position.y = targetY;
+      }
+    }
+  }
+
+  return {
+    enabled,
+    tick(delta) {
+      if (disabledAfterErrors) return;
+      if (!started) {
+        if (!gameActive) return;
+        started = true;
+        connect();
+        return;
+      }
+      maybeSend();
+      animateRemotes(delta);
+    },
+    debug() {
+      return {
+        room, selfId, connected: !!socket && socket.readyState === 1,
+        remotes: [...remotes.entries()].map(([id, remote]) => {
+          let modelHeight = 0;
+          if (remote.model) {
+            const size = new THREE.Box3().setFromObject(remote.model).getSize(new THREE.Vector3());
+            modelHeight = Math.round(size.y * 100) / 100;
+          }
+          return { id, x: remote.root.position.x, y: remote.root.position.y, z: remote.root.position.z, buffered: remote.buf.length, hasModel: !!remote.model, modelHeight };
+        }),
+      };
+    },
+  };
+})();
+window.__mpDebug = () => MP.debug();
 </script>
 </body>
 </html>

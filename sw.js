@@ -1,5 +1,5 @@
 // Zebra Circus Blaster — service worker (offline + installability)
-const CACHE = 'zcb-v4-replaceable-runtime-visuals';
+const CACHE = 'zcb-v5-multiplayer-plaza';
 const CORE = [
   './',
   './index.html',

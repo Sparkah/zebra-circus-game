@@ -1,0 +1,26 @@
+{
+  "$schema": "https://unpkg.com/wrangler/config-schema.json",
+  "name": "zebra-circus-mp",
+  "main": "worker.mjs",
+  "compatibility_date": "2026-07-22",
+  "workers_dev": true,
+  "preview_urls": false,
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "PLAZA",
+        "class_name": "ZebraPlazaRoom"
+      }
+    ]
+  },
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": ["ZebraPlazaRoom"]
+    }
+  ],
+  "observability": {
+    "enabled": true,
+    "head_sampling_rate": 1
+  }
+}
