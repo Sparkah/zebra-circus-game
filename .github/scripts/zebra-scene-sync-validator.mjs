@@ -1,6 +1,7 @@
 // cloud/zebraSyncValidator.ts
 import { createHash } from "node:crypto";
 import { readFile, writeFile } from "node:fs/promises";
+import path from "node:path";
 
 // src/logicModel.ts
 var MAX_PROJECT_VARIABLES = 64;
@@ -893,9 +894,6 @@ var MAX_TIMER_DURATION_TICKS = 60 * 60 * 60;
 var PRIMITIVE_TYPES = ["plane", "cube", "sphere", "cylinder", "capsule"];
 var VECTOR2_INPUT_BINDINGS = ["keyboard-wasd-arrows", "gamepad-left-stick", "touch-virtual-stick"];
 var BUTTON_INPUT_BINDINGS = ["keyboard-space-enter", "gamepad-south-button", "touch-action-button"];
-function meshRendererComponent(object) {
-  return object.components.find((component) => component.type === "mesh-renderer") ?? null;
-}
 function cameraComponent(object) {
   return object.components.find((component) => component.type === "camera") ?? null;
 }
@@ -953,11 +951,11 @@ function validateGlbBytes(bytes) {
     chunks.push({ type, offset, length });
     offset += length;
   }
-  const JSON_CHUNK = 1313821514;
-  const BIN_CHUNK = 5130562;
-  if (!chunks.length || chunks[0].type !== JSON_CHUNK) throw new Error("That GLB file must begin with one JSON chunk.");
-  if (chunks.filter((chunk) => chunk.type === JSON_CHUNK).length !== 1) throw new Error("That GLB file must contain exactly one JSON chunk.");
-  if (chunks.filter((chunk) => chunk.type === BIN_CHUNK).length > 1) throw new Error("That GLB file contains more than one BIN chunk.");
+  const JSON_CHUNK2 = 1313821514;
+  const BIN_CHUNK2 = 5130562;
+  if (!chunks.length || chunks[0].type !== JSON_CHUNK2) throw new Error("That GLB file must begin with one JSON chunk.");
+  if (chunks.filter((chunk) => chunk.type === JSON_CHUNK2).length !== 1) throw new Error("That GLB file must contain exactly one JSON chunk.");
+  if (chunks.filter((chunk) => chunk.type === BIN_CHUNK2).length > 1) throw new Error("That GLB file contains more than one BIN chunk.");
   let jsonText;
   try {
     jsonText = new TextDecoder("utf-8", { fatal: true, ignoreBOM: false }).decode(bytes.subarray(chunks[0].offset, chunks[0].offset + chunks[0].length));
@@ -977,25 +975,25 @@ function validateGlbBytes(bytes) {
     throw new Error("That GLB file does not declare a supported glTF 2.0 asset.");
   }
   rejectExternalGlbUris(json);
-  const bin = chunks.find((chunk) => chunk.type === BIN_CHUNK);
+  const bin = chunks.find((chunk) => chunk.type === BIN_CHUNK2);
   const buffers = json.buffers === void 0 ? [] : json.buffers;
   if (!Array.isArray(buffers)) throw new Error("That GLB file has an invalid buffers collection.");
   const bufferLengths = buffers.map((value, index) => {
     if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error(`That GLB file has an invalid buffer at index ${index}.`);
-    const record = value;
-    if (!Number.isSafeInteger(record.byteLength) || record.byteLength < 0) throw new Error(`That GLB file has an invalid buffer length at index ${index}.`);
-    if (index === 0 && !("uri" in record) && record.byteLength > (bin?.length ?? 0)) throw new Error("That GLB file declares more binary data than its BIN chunk contains.");
-    return record.byteLength;
+    const record2 = value;
+    if (!Number.isSafeInteger(record2.byteLength) || record2.byteLength < 0) throw new Error(`That GLB file has an invalid buffer length at index ${index}.`);
+    if (index === 0 && !("uri" in record2) && record2.byteLength > (bin?.length ?? 0)) throw new Error("That GLB file declares more binary data than its BIN chunk contains.");
+    return record2.byteLength;
   });
   const bufferViews = json.bufferViews === void 0 ? [] : json.bufferViews;
   if (!Array.isArray(bufferViews)) throw new Error("That GLB file has an invalid bufferViews collection.");
   for (let index = 0; index < bufferViews.length; index += 1) {
     const value = bufferViews[index];
     if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error(`That GLB file has an invalid bufferView at index ${index}.`);
-    const record = value;
-    const bufferIndex = record.buffer;
-    const byteOffset = record.byteOffset ?? 0;
-    const byteLength = record.byteLength;
+    const record2 = value;
+    const bufferIndex = record2.buffer;
+    const byteOffset = record2.byteOffset ?? 0;
+    const byteLength = record2.byteLength;
     if (!Number.isSafeInteger(bufferIndex) || bufferIndex < 0 || bufferIndex >= bufferLengths.length || !Number.isSafeInteger(byteOffset) || byteOffset < 0 || !Number.isSafeInteger(byteLength) || byteLength < 0 || byteOffset + byteLength > bufferLengths[bufferIndex]) {
       throw new Error(`That GLB file has an out-of-range bufferView at index ${index}.`);
     }
@@ -1005,12 +1003,12 @@ function validateGlbBytes(bytes) {
   for (let index = 0; index < images.length; index += 1) {
     const value = images[index];
     if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error(`That GLB file has an invalid image at index ${index}.`);
-    const record = value;
-    if ("bufferView" in record) {
-      if (!Number.isSafeInteger(record.bufferView) || record.bufferView < 0 || record.bufferView >= bufferViews.length) {
+    const record2 = value;
+    if ("bufferView" in record2) {
+      if (!Number.isSafeInteger(record2.bufferView) || record2.bufferView < 0 || record2.bufferView >= bufferViews.length) {
         throw new Error(`That GLB file has an out-of-range image bufferView at index ${index}.`);
       }
-      if (record.mimeType !== "image/png" && record.mimeType !== "image/jpeg") {
+      if (record2.mimeType !== "image/png" && record2.mimeType !== "image/jpeg") {
         throw new Error("Embedded GLB images must use PNG or JPEG data.");
       }
     }
@@ -1643,13 +1641,22 @@ var ZEBRA_LEGACY_ASSET_IDS = [
   "asset-balloon-cyan",
   "asset-balloon-pink"
 ];
+var ZEBRA_BUILT_IN_ASSET_ID_SET = /* @__PURE__ */ new Set([
+  ...ZEBRA_ASSET_IDS,
+  ...ZEBRA_LEGACY_ASSET_IDS
+]);
+var ZEBRA_UPLOADED_ASSET_ID = /^asset-upload-[0-9a-f]{48}$/;
 function isZebraRuntimeOwnedObjectId(id) {
   return ZEBRA_REQUIRED_OBJECT_ID_SET.has(id);
 }
-function isSupportedZebraExtraObject(object) {
+function isSupportedZebraExtraObject(object, supportedModelAssetIds) {
   return object.components.every((component) => {
     if (component.type === "box-collider") return true;
-    return component.type === "mesh-renderer" && component.source.kind === "primitive" && component.material.kind === "inline" && component.material.baseColorTextureAssetId === null;
+    if (component.type !== "mesh-renderer") return false;
+    if (component.source.kind === "asset") {
+      return supportedModelAssetIds.has(component.source.assetId) && component.material.kind === "embedded";
+    }
+    return component.source.kind === "primitive" && component.material.kind === "inline" && component.material.baseColorTextureAssetId === null;
   });
 }
 function runtimeAdapterForScene(scene) {
@@ -1657,7 +1664,8 @@ function runtimeAdapterForScene(scene) {
   const objectIds = new Set(scene.objects.map((object) => object.id));
   const assetIds = new Set(scene.assets.map((asset) => asset.id));
   if (!ZEBRA_REQUIRED_OBJECT_IDS.every((id) => objectIds.has(id))) return null;
-  if (!scene.objects.filter((object) => !ZEBRA_REQUIRED_OBJECT_ID_SET.has(object.id)).every(isSupportedZebraExtraObject)) return null;
+  const supportedModelAssetIds = new Set(scene.assets.flatMap((asset) => asset.type === "model" && asset.format === "glb" && (ZEBRA_BUILT_IN_ASSET_ID_SET.has(asset.id) || ZEBRA_UPLOADED_ASSET_ID.test(asset.id)) ? [asset.id] : []));
+  if (!scene.objects.filter((object) => !ZEBRA_REQUIRED_OBJECT_ID_SET.has(object.id)).every((object) => isSupportedZebraExtraObject(object, supportedModelAssetIds))) return null;
   const exactVisualAssets = ZEBRA_ASSET_IDS.every((id) => assetIds.has(id));
   const legacyVisualAssets = ZEBRA_LEGACY_ASSET_IDS.every((id) => assetIds.has(id));
   if (!exactVisualAssets && !legacyVisualAssets) return null;
@@ -1669,20 +1677,6 @@ function runtimeAdapterForScene(scene) {
   if (!hasDirectParent(ZEBRA_BALLOON_IDS, "balloons-root")) return null;
   if (!hasDirectParent(ZEBRA_TRAPEZE_IDS, "decor-root")) return null;
   if (!hasDirectParent([...ZEBRA_LIGHT_IDS, "tent-details"], "arena-root")) return null;
-  const assetForObject = (id) => {
-    const object = scene.objects.find((candidate) => candidate.id === id);
-    const renderer = object ? meshRendererComponent(object) : null;
-    return renderer?.source.kind === "asset" ? renderer.source.assetId : null;
-  };
-  if (exactVisualAssets) {
-    const qrAssets = /* @__PURE__ */ new Set(["asset-qr-mc9400", "asset-qr-mc3400", "asset-qr-ps30", "asset-qr-tc8300"]);
-    const qrIds = ["qr-mc9400", "qr-mc3400", "qr-ps30", "qr-tc8300"];
-    const seatedAssets = new Set(numberedIds("asset-crowd-seated", 40));
-    const importedCrowdAssets = /* @__PURE__ */ new Set(["asset-crowd-char1", "asset-crowd-char2", "asset-crowd-char4", "asset-crowd-char6", "asset-crowd-man", "asset-crowd-worker"]);
-    if (!qrIds.every((id) => qrAssets.has(assetForObject(id) ?? ""))) return null;
-    if (!ZEBRA_PROCEDURAL_CROWD_IDS.every((id) => seatedAssets.has(assetForObject(id) ?? ""))) return null;
-    if (!ZEBRA_GLTF_CROWD_IDS.every((id) => importedCrowdAssets.has(assetForObject(id) ?? ""))) return null;
-  }
   return ZEBRA_RUNTIME_ADAPTER;
 }
 
@@ -1694,31 +1688,177 @@ var ZebraCollaborationContractError = class extends Error {
     this.name = "ZebraCollaborationContractError";
   }
 };
-var QR_ASSET_IDS = /* @__PURE__ */ new Set(["asset-qr-mc9400", "asset-qr-mc3400", "asset-qr-ps30", "asset-qr-tc8300"]);
+var SAFE_ID3 = /^[a-z0-9][a-z0-9_-]{0,63}$/i;
+var HEX_COLOR2 = /^#[0-9a-f]{6}$/i;
+var SUPPORTED_PRIMITIVES = /* @__PURE__ */ new Set(["plane", "cube", "sphere", "cylinder", "capsule"]);
+var OBJECT_KEYS = ["id", "name", "parentId", "visible", "locked", "position", "rotation", "scale", "components"];
+var HOSTED_UPLOADED_ASSET_ID = /^asset-upload-[0-9a-f]{48}$/;
+var COMPACT_ASSET_KEYS = ["id", "name", "type", "format", "fileName", "bytes"];
+var FULL_ASSET_KEYS = [...COMPACT_ASSET_KEYS, "source"];
+var MAX_HOSTED_UPLOADED_ASSET_BYTES = Math.min(MAX_GLB_SOURCE_BYTES, 8 * 1024 * 1024);
 function jsonEqual(left, right) {
   return JSON.stringify(left) === JSON.stringify(right);
 }
+function isHostedUploadedAssetId(value) {
+  return typeof value === "string" && HOSTED_UPLOADED_ASSET_ID.test(value);
+}
+function isHostedUploadedAssetDescriptor(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const asset = value;
+  if (Object.keys(asset).length !== COMPACT_ASSET_KEYS.length || !Object.keys(asset).every((key) => COMPACT_ASSET_KEYS.includes(key))) return false;
+  if (!isHostedUploadedAssetId(asset.id) || asset.type !== "model" || asset.format !== "glb" || asset.fileName !== `${asset.id}.glb`) return false;
+  if (typeof asset.name !== "string" || !asset.name.trim() || asset.name.length > 80 || /[\u0000-\u001f\u007f]/.test(asset.name)) return false;
+  return typeof asset.bytes === "number" && Number.isSafeInteger(asset.bytes) && asset.bytes > 0 && asset.bytes <= MAX_HOSTED_UPLOADED_ASSET_BYTES;
+}
+function isHostedUploadedSceneAsset(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const asset = value;
+  if (Object.keys(asset).length !== FULL_ASSET_KEYS.length || !Object.keys(asset).every((key) => FULL_ASSET_KEYS.includes(key)) || typeof asset.source !== "string" || !asset.source) return false;
+  const { source: _source, ...descriptor } = asset;
+  return isHostedUploadedAssetDescriptor(descriptor);
+}
+function compactSceneAsset(asset) {
+  const { source: _source, ...compact } = asset;
+  return compact;
+}
 function compactSceneDocument(scene) {
-  const assets = scene.assets.map(({ source: _source, ...asset }) => ({ ...asset }));
+  const assets = scene.assets.map((asset) => compactSceneAsset(asset));
   return structuredClone({ ...scene, assets });
 }
-function hydrateSceneDocument(compact, seed) {
-  const seedAssets = compactSceneDocument(seed).assets;
-  if (!jsonEqual(compact.assets, seedAssets)) {
-    throw new ZebraCollaborationContractError("asset_pack_changed", "Zebra's immutable hosted asset pack cannot be changed.");
+function validateUploadedCatalog(uploadedCatalog, seedAssets) {
+  if (!Array.isArray(uploadedCatalog)) fail("invalid_uploaded_asset", "The hosted upload catalog must be a list.");
+  const seedIds = new Set(seedAssets.map((asset) => asset.id.toLowerCase()));
+  const seedFiles = new Set(seedAssets.map((asset) => asset.fileName.toLowerCase()));
+  const byId = /* @__PURE__ */ new Map();
+  const fileNames = /* @__PURE__ */ new Set();
+  for (const entry of uploadedCatalog) {
+    if (!isHostedUploadedAssetDescriptor(entry)) {
+      fail("invalid_uploaded_asset", "The hosted upload catalog contains invalid or unsafe GLB metadata.");
+    }
+    const normalizedId = entry.id.toLowerCase();
+    const normalizedFile = entry.fileName.toLowerCase();
+    if (seedIds.has(normalizedId) || seedFiles.has(normalizedFile)) {
+      fail("uploaded_asset_collision", `Hosted upload ${entry.id} collides with Zebra's built-in asset pack.`);
+    }
+    if (byId.has(entry.id) || fileNames.has(normalizedFile)) {
+      fail("uploaded_asset_collision", `Hosted upload ${entry.id} is duplicated in the active catalog.`);
+    }
+    byId.set(entry.id, structuredClone(entry));
+    fileNames.add(normalizedFile);
   }
-  return structuredClone({ ...compact, assets: seed.assets });
+  return byId;
 }
-function assertZebraCollaboratorMutationAllowed(baseline2, candidate) {
-  const baselineEnvelope = { ...baseline2, objects: [] };
-  const candidateEnvelope = { ...candidate, objects: [] };
+function validateCompactHostedAssetPack(candidateAssets, seedAssets, uploadedCatalog) {
+  if (!Array.isArray(candidateAssets) || !Array.isArray(seedAssets)) {
+    fail("invalid_scene", "Zebra's asset metadata must be a list.");
+  }
+  if (candidateAssets.length < seedAssets.length) {
+    fail("asset_pack_changed", "Zebra's immutable asset metadata for required built-in assets cannot be removed.");
+  }
+  for (let index = 0; index < seedAssets.length; index += 1) {
+    if (!jsonEqual(candidateAssets[index], seedAssets[index])) {
+      fail("asset_pack_changed", "Zebra's immutable asset metadata for required built-in assets must remain an exact prefix.");
+    }
+  }
+  const catalogById = validateUploadedCatalog(uploadedCatalog, seedAssets);
+  const uploadedAssets2 = candidateAssets.slice(seedAssets.length);
+  if (uploadedAssets2.length !== catalogById.size) {
+    fail("uploaded_asset_catalog_mismatch", "Zebra's active uploaded asset metadata does not match the hosted upload catalog.");
+  }
+  const seen = /* @__PURE__ */ new Set();
+  for (const asset of uploadedAssets2) {
+    if (!isHostedUploadedAssetDescriptor(asset)) {
+      fail("invalid_uploaded_asset", "Only bounded, server-named GLB model uploads can extend Zebra's hosted asset pack.");
+    }
+    const expected = catalogById.get(asset.id);
+    if (!expected || !jsonEqual(asset, expected)) {
+      fail("uploaded_asset_catalog_mismatch", `Hosted upload metadata for ${asset.id} does not match the active catalog.`);
+    }
+    if (seen.has(asset.id)) fail("uploaded_asset_collision", `Hosted upload ${asset.id} appears more than once in the scene.`);
+    seen.add(asset.id);
+  }
+  for (const id of catalogById.keys()) {
+    if (!seen.has(id)) fail("uploaded_asset_catalog_mismatch", `Active hosted upload ${id} is missing from the scene.`);
+  }
+  if (candidateAssets.length > MAX_SCENE_ASSETS) {
+    fail("invalid_scene", `Zebra cannot contain more than ${MAX_SCENE_ASSETS} assets.`);
+  }
+  let totalBytes = 0;
+  for (const asset of candidateAssets) {
+    if (typeof asset.bytes !== "number" || !Number.isSafeInteger(asset.bytes) || asset.bytes <= 0) {
+      fail("invalid_scene", `Asset ${String(asset.id)} has invalid byte metadata.`);
+    }
+    totalBytes += asset.bytes;
+  }
+  if (!Number.isSafeInteger(totalBytes) || totalBytes > MAX_SCENE_ASSET_BYTES) {
+    fail("invalid_scene", "Zebra's hosted asset data exceeds the 64 MB scene limit.");
+  }
+  return catalogById;
+}
+function validateUploadedFullCatalog(uploadedFullAssets, seedAssets) {
+  if (!Array.isArray(uploadedFullAssets)) fail("invalid_uploaded_asset", "The hosted upload source catalog must be a list.");
+  const descriptors = [];
+  const byId = /* @__PURE__ */ new Map();
+  for (const asset of uploadedFullAssets) {
+    if (!isHostedUploadedSceneAsset(asset)) {
+      fail("invalid_uploaded_asset", "The hosted upload source catalog contains an invalid GLB asset.");
+    }
+    let bytes;
+    try {
+      bytes = sceneAssetBytes(asset);
+      validateGlbBytes(bytes);
+    } catch (cause) {
+      const detail = cause instanceof Error ? ` ${cause.message}` : "";
+      fail("invalid_uploaded_asset_source", `Hosted upload ${asset.id} has unreadable GLB data.${detail}`);
+    }
+    if (bytes.byteLength !== asset.bytes) {
+      fail("invalid_uploaded_asset_source", `Hosted upload ${asset.id} does not match its declared byte length.`);
+    }
+    const descriptor = compactSceneAsset(asset);
+    descriptors.push(descriptor);
+    byId.set(asset.id, structuredClone(asset));
+  }
+  validateUploadedCatalog(descriptors, seedAssets.map((asset) => compactSceneAsset(asset)));
+  return { descriptors, byId };
+}
+function hydrateSceneDocument(compact, seed, uploadedFullAssets = []) {
+  const seedAssets = compactSceneDocument(seed).assets;
+  const fullCatalog = validateUploadedFullCatalog(uploadedFullAssets, seed.assets);
+  validateCompactHostedAssetPack(compact.assets, seedAssets, fullCatalog.descriptors);
+  const hydratedAssets = compact.assets.map((asset, index) => {
+    if (index < seed.assets.length) return structuredClone(seed.assets[index]);
+    const uploaded = fullCatalog.byId.get(asset.id);
+    if (!uploaded) fail("uploaded_asset_source_missing", `Hosted upload ${asset.id} is missing its GLB source.`);
+    if (!jsonEqual(compactSceneAsset(uploaded), asset)) {
+      fail("uploaded_asset_catalog_mismatch", `Hosted upload source metadata for ${asset.id} does not match the scene.`);
+    }
+    return structuredClone(uploaded);
+  });
+  return structuredClone({ ...compact, assets: hydratedAssets });
+}
+function assertZebraCollaboratorMutationAllowed(baseline2, candidate, uploadedFullAssets = []) {
+  const fullCatalog = validateUploadedFullCatalog(uploadedFullAssets, baseline2.assets);
+  validateCompactHostedZebraScene(compactSceneDocument(candidate), compactSceneDocument(baseline2), fullCatalog.descriptors);
+  const baselineEnvelope = { ...baseline2, assets: [], objects: [] };
+  const candidateEnvelope = { ...candidate, assets: [], objects: [] };
   if (!jsonEqual(baselineEnvelope, candidateEnvelope)) {
     throw new ZebraCollaborationContractError(
       "project_data_locked",
-      "The focused editor cannot change Zebra's project settings, input/logic data, active camera, background, or embedded asset pack."
+      "The focused editor cannot change Zebra's project settings, input/logic data, active camera, or background."
     );
   }
+  for (let index = 0; index < baseline2.assets.length; index += 1) {
+    if (!jsonEqual(candidate.assets[index], baseline2.assets[index])) {
+      throw new ZebraCollaborationContractError("asset_pack_changed", "Zebra's immutable built-in asset sources cannot be changed.");
+    }
+  }
+  for (const asset of candidate.assets.slice(baseline2.assets.length)) {
+    if (!jsonEqual(asset, fullCatalog.byId.get(asset.id))) {
+      throw new ZebraCollaborationContractError("invalid_uploaded_asset_source", `Hosted upload ${asset.id} does not match its registered GLB source.`);
+    }
+  }
   const candidateById = new Map(candidate.objects.map((object) => [object.id, object]));
+  const assetsById = new Map(candidate.assets.map((asset) => [asset.id, asset]));
   for (const original of baseline2.objects.filter((object) => isZebraRuntimeOwnedObjectId(object.id))) {
     const edited = candidateById.get(original.id);
     if (!edited) throw new ZebraCollaborationContractError("fixed_object_missing", `The required Zebra object ${original.id} is missing.`);
@@ -1732,13 +1872,7 @@ function assertZebraCollaboratorMutationAllowed(baseline2, candidate) {
       if (component.id !== next.id) throw new ZebraCollaborationContractError("fixed_component_identity", `${original.id} cannot replace its ${type} component identity.`);
       if (component.type === "mesh-renderer") {
         if (next.type !== "mesh-renderer") throw new ZebraCollaborationContractError("fixed_mesh_changed", `${original.id} has an invalid Mesh Renderer.`);
-        if (original.id.startsWith("qr-")) {
-          if (next.source.kind !== "asset" || !QR_ASSET_IDS.has(next.source.assetId)) {
-            throw new ZebraCollaborationContractError("invalid_qr_artwork", `${original.id} must use one of Zebra's four exact QR artworks.`);
-          }
-        } else if (!jsonEqual(component.source, next.source)) {
-          throw new ZebraCollaborationContractError("fixed_mesh_source", `${original.id} cannot change its original mesh source.`);
-        }
+        validateSupportedMeshSource(next.source, assetsById, original.id);
         continue;
       }
       if (component.type === "camera" || component.type === "directional-light") continue;
@@ -1753,39 +1887,1452 @@ function assertZebraCollaboratorMutationAllowed(baseline2, candidate) {
     }
   }
 }
-function validateHostedZebraScene(compact, seed) {
-  const candidate = hydrateSceneDocument(compact, seed);
+function validateHostedZebraScene(compact, seed, uploadedFullAssets = []) {
+  const uploadedDescriptors = uploadedFullAssets.map((asset) => compactSceneAsset(asset));
+  validateCompactHostedZebraScene(compact, compactSceneDocument(seed), uploadedDescriptors);
+  const candidate = hydrateSceneDocument(compact, seed, uploadedFullAssets);
   try {
     validateScene(candidate);
   } catch (cause) {
     throw new ZebraCollaborationContractError("invalid_scene", cause instanceof Error ? cause.message : "The Zebra scene failed schema validation.");
   }
-  if (runtimeAdapterForScene(candidate)?.kind !== "zebra-runtime") {
+  const runtimeInventory = {
+    ...candidate,
+    objects: candidate.objects.filter((object) => isZebraRuntimeOwnedObjectId(object.id))
+  };
+  if (runtimeAdapterForScene(runtimeInventory)?.kind !== "zebra-runtime") {
     throw new ZebraCollaborationContractError("not_zebra_scene", "The scene no longer matches Zebra's fixed runtime inventory and supported editable extras.");
   }
-  assertZebraCollaboratorMutationAllowed(seed, candidate);
+  assertZebraCollaboratorMutationAllowed(seed, candidate, uploadedFullAssets);
   return candidate;
+}
+function validateCompactHostedZebraScene(compact, seed, uploadedCatalog = []) {
+  if (!compact || typeof compact !== "object" || !seed || typeof seed !== "object") fail("invalid_scene", "A compact Zebra scene is required.");
+  validateCompactHostedAssetPack(compact.assets, seed.assets, uploadedCatalog);
+  const compactEnvelope = { ...compact, assets: [], objects: [] };
+  const seedEnvelope = { ...seed, assets: [], objects: [] };
+  if (!jsonEqual(compactEnvelope, seedEnvelope)) fail("project_data_locked", "Zebra's project settings cannot be changed online.");
+  if (!Array.isArray(compact.objects) || compact.objects.length === 0 || compact.objects.length > 500) fail("invalid_scene", "Zebra must contain between 1 and 500 objects.");
+  const assetsById = new Map(compact.assets.map((asset) => [asset.id, asset]));
+  const candidateById = /* @__PURE__ */ new Map();
+  const normalizedIds = /* @__PURE__ */ new Set();
+  for (const object of compact.objects) {
+    validateObjectRecord(object, assetsById);
+    const normalized = object.id.toLowerCase();
+    if (normalizedIds.has(normalized)) fail("invalid_scene", `Duplicate Zebra object id: ${object.id}.`);
+    normalizedIds.add(normalized);
+    candidateById.set(object.id, object);
+  }
+  for (const original of seed.objects.filter((object) => isZebraRuntimeOwnedObjectId(object.id))) {
+    const edited = candidateById.get(original.id);
+    if (!edited) fail("fixed_object_missing", `The required Zebra object ${original.id} is missing.`);
+    if (edited.parentId !== original.parentId) fail("fixed_parent_changed", `The required Zebra object ${original.id} cannot change parent.`);
+    validateFixedObjectComponents(original, edited);
+  }
+  for (const object of compact.objects) {
+    if (object.parentId !== null && !candidateById.has(object.parentId)) fail("invalid_scene", `${object.id} references missing parent ${object.parentId}.`);
+    if (object.parentId === object.id) fail("invalid_scene", `${object.id} cannot parent itself.`);
+    if (!isZebraRuntimeOwnedObjectId(object.id)) validateExtraObject(object, assetsById);
+  }
+  for (const object of compact.objects) {
+    const ancestry = /* @__PURE__ */ new Set();
+    let current = object;
+    let depth = 0;
+    while (current) {
+      if (ancestry.has(current.id)) fail("invalid_scene", `Zebra's object hierarchy contains a cycle at ${current.id}.`);
+      ancestry.add(current.id);
+      if (++depth > 64) fail("invalid_scene", `Zebra's object hierarchy exceeds 64 levels at ${object.id}.`);
+      current = current.parentId === null ? void 0 : candidateById.get(current.parentId);
+    }
+  }
+  const camera = candidateById.get(compact.activeCameraId);
+  const cameraComponent2 = camera?.components.find((component) => component.type === "camera");
+  if (!camera || !cameraComponent2 || cameraComponent2.type !== "camera" || !cameraComponent2.enabled) fail("invalid_scene", "Zebra's active camera must remain enabled.");
+  let activeBranch = camera;
+  while (activeBranch) {
+    if (!activeBranch.visible) fail("invalid_scene", "Zebra's active camera must remain visible.");
+    activeBranch = activeBranch.parentId === null ? void 0 : candidateById.get(activeBranch.parentId);
+  }
+}
+function fail(code, message) {
+  throw new ZebraCollaborationContractError(code, message);
+}
+function validateExactKeys3(value, allowed, label) {
+  const allowedSet = new Set(allowed);
+  const unsupported = Object.keys(value).find((key) => !allowedSet.has(key));
+  if (unsupported) fail("invalid_scene", `${label} contains unsupported field ${unsupported}.`);
+}
+function validateVector2(value, label, minimum, maximum) {
+  if (!value || typeof value !== "object") fail("invalid_scene", `${label} must contain x, y and z.`);
+  validateExactKeys3(value, ["x", "y", "z"], label);
+  for (const axis of ["x", "y", "z"]) {
+    const part = value[axis];
+    if (typeof part !== "number" || !Number.isFinite(part) || part < minimum || part > maximum) {
+      fail("invalid_scene", `${label}.${axis} is outside the supported range.`);
+    }
+  }
+}
+function validateObjectRecord(object, assetsById) {
+  if (!object || typeof object !== "object") fail("invalid_scene", "Zebra contains an invalid object.");
+  validateExactKeys3(object, OBJECT_KEYS, `Object ${String(object.id)}`);
+  if (typeof object.id !== "string" || !SAFE_ID3.test(object.id)) fail("invalid_scene", `Unsafe Zebra object id: ${String(object.id)}.`);
+  if (typeof object.name !== "string" || !object.name.trim() || object.name.length > 80 || /[\u0000-\u001f\u007f<>]/.test(object.name)) fail("invalid_scene", `Object ${object.id} has an invalid name.`);
+  if (object.parentId !== null && (typeof object.parentId !== "string" || !SAFE_ID3.test(object.parentId))) fail("invalid_scene", `Object ${object.id} has an invalid parent.`);
+  if (typeof object.visible !== "boolean" || typeof object.locked !== "boolean") fail("invalid_scene", `Object ${object.id} has invalid visibility or lock state.`);
+  validateVector2(object.position, `${object.id} position`, -1e4, 1e4);
+  validateVector2(object.rotation, `${object.id} rotation`, -36e4, 36e4);
+  validateVector2(object.scale, `${object.id} scale`, 0.01, 1e3);
+  if (!Array.isArray(object.components) || object.components.length > 16) fail("invalid_scene", `Object ${object.id} has too many components.`);
+  const ids = /* @__PURE__ */ new Set();
+  const types = /* @__PURE__ */ new Set();
+  for (const component of object.components) {
+    if (!component || typeof component !== "object" || typeof component.id !== "string" || !SAFE_ID3.test(component.id)) fail("invalid_scene", `Object ${object.id} has an invalid component id.`);
+    if (ids.has(component.id.toLowerCase()) || types.has(component.type)) fail("invalid_scene", `Object ${object.id} contains a duplicate component.`);
+    ids.add(component.id.toLowerCase());
+    types.add(component.type);
+    validateComponent(component, object.id, assetsById);
+  }
+}
+function validateComponent(component, objectId, assetsById) {
+  if (component.type === "box-collider") {
+    validateExactKeys3(component, ["id", "type", "enabled", "center", "size", "isTrigger"], `${objectId} Box Collider`);
+    if (typeof component.enabled !== "boolean" || typeof component.isTrigger !== "boolean") fail("invalid_scene", `${objectId} has an invalid Box Collider state.`);
+    validateVector2(component.center, `${objectId} collider centre`, -1e4, 1e4);
+    validateVector2(component.size, `${objectId} collider size`, 1e-3, 1e4);
+    return;
+  }
+  if (component.type === "mesh-renderer") {
+    validateExactKeys3(component, ["id", "type", "enabled", "source", "material"], `${objectId} Mesh Renderer`);
+    if (typeof component.enabled !== "boolean" || !component.source || typeof component.source !== "object") fail("invalid_scene", `${objectId} has an invalid Mesh Renderer.`);
+    if (component.source.kind === "asset") {
+      validateExactKeys3(component.source, ["kind", "assetId"], `${objectId} model source`);
+      if (!SAFE_ID3.test(component.source.assetId)) fail("invalid_scene", `${objectId} has an invalid model asset id.`);
+    } else if (component.source.kind === "primitive") {
+      validateExactKeys3(component.source, ["kind", "primitive"], `${objectId} primitive source`);
+      if (!SUPPORTED_PRIMITIVES.has(component.source.primitive)) fail("invalid_scene", `${objectId} has an unsupported primitive.`);
+    } else fail("invalid_scene", `${objectId} has an unsupported mesh source.`);
+    validateSupportedMeshSource(component.source, assetsById, objectId);
+    validateMaterial(component.material, `${objectId} material`);
+    if (component.source.kind === "primitive" && component.material.kind === "embedded") {
+      fail("invalid_scene", `${objectId} embedded material requires a GLB model source.`);
+    }
+    if (component.source.kind === "asset" && component.material.kind === "embedded" && assetsById.get(component.source.assetId)?.format !== "glb") {
+      fail("invalid_scene", `${objectId} embedded material requires a GLB model source.`);
+    }
+    return;
+  }
+  if (component.type === "camera") {
+    validateExactKeys3(component, ["id", "type", "enabled", "projection", "verticalFov", "nearClip", "farClip"], `${objectId} Camera`);
+    if (typeof component.enabled !== "boolean" || component.projection !== "perspective" || !range(component.verticalFov, 1, 179) || !range(component.nearClip, 1e-3, 9999) || !range(component.farClip, 0.01, 1e5) || component.farClip <= component.nearClip) fail("invalid_scene", `${objectId} has invalid Camera settings.`);
+    return;
+  }
+  if (component.type === "directional-light") {
+    validateExactKeys3(component, ["id", "type", "enabled", "color", "intensity", "castShadows"], `${objectId} Directional Light`);
+    if (typeof component.enabled !== "boolean" || !HEX_COLOR2.test(component.color) || !range(component.intensity, 0, 100) || typeof component.castShadows !== "boolean") fail("invalid_scene", `${objectId} has invalid light settings.`);
+    return;
+  }
+  if (!["move-from-input", "timer", "logic"].includes(component.type)) fail("invalid_scene", `${objectId} has unsupported component type ${String(component.type)}.`);
+}
+function validateMaterial(material, label) {
+  if (!material || typeof material !== "object") fail("invalid_scene", `${label} is missing.`);
+  if (material.kind === "inline") {
+    validateExactKeys3(material, ["kind", "shading", "baseColor", "baseColorTextureAssetId", "roughness", "metalness", "opacity", "alphaMode", "alphaCutoff", "doubleSided"], label);
+    if (!["lit", "unlit"].includes(material.shading) || !HEX_COLOR2.test(material.baseColor) || material.baseColorTextureAssetId !== null || !range(material.roughness, 0, 1) || !range(material.metalness, 0, 1) || !range(material.opacity, 0, 1) || !["opaque", "mask", "blend"].includes(material.alphaMode) || !range(material.alphaCutoff, 0, 1) || typeof material.doubleSided !== "boolean") fail("invalid_scene", `${label} is invalid.`);
+    return;
+  }
+  if (material.kind !== "embedded") fail("invalid_scene", `${label} has an unsupported kind.`);
+  validateExactKeys3(material, ["kind", "overrides"], label);
+  if (!Array.isArray(material.overrides) || material.overrides.length > 64) fail("invalid_scene", `${label} has too many overrides.`);
+  const slots = /* @__PURE__ */ new Set();
+  for (const override of material.overrides) {
+    if (!override || typeof override !== "object") fail("invalid_scene", `${label} has an invalid override.`);
+    validateExactKeys3(override, ["slot", "material"], `${label} override`);
+    if (typeof override.slot !== "string" || !override.slot.trim() || override.slot.length > 128 || slots.has(override.slot.toLowerCase())) fail("invalid_scene", `${label} has an invalid override slot.`);
+    slots.add(override.slot.toLowerCase());
+    if (override.material?.kind !== "inline") fail("invalid_scene", `${label} override ${override.slot} must be inline.`);
+    validateMaterial(override.material, `${label} override ${override.slot}`);
+  }
+}
+function validateSupportedMeshSource(source, assetsById, objectId) {
+  if (source.kind === "primitive") {
+    if (!SUPPORTED_PRIMITIVES.has(source.primitive)) fail("invalid_scene", `${objectId} has an unsupported primitive mesh source.`);
+    return;
+  }
+  const asset = assetsById.get(source.assetId);
+  if (!asset || asset.type !== "model") {
+    fail("invalid_mesh_asset", `${objectId} mesh source must reference an existing immutable Zebra model asset or a registered hosted upload.`);
+  }
+}
+function validateFixedObjectComponents(original, edited) {
+  const originalComponents = new Map(original.components.map((component) => [component.type, component]));
+  const editedComponents = new Map(edited.components.map((component) => [component.type, component]));
+  for (const [type, component] of originalComponents) {
+    if (type === "box-collider") continue;
+    const next = editedComponents.get(type);
+    if (!next || next.id !== component.id) fail("fixed_component_identity", `${original.id} cannot remove or replace its ${type} component.`);
+    if (component.type === "mesh-renderer" && next.type === "mesh-renderer") {
+      continue;
+    }
+    if (type === "camera" || type === "directional-light") continue;
+    if (!jsonEqual(component, next)) fail("runtime_component_locked", `${original.id} cannot change its ${type} runtime component.`);
+  }
+  for (const type of editedComponents.keys()) {
+    if (type !== "box-collider" && !originalComponents.has(type)) fail("unsupported_fixed_component", `${original.id} can only add a Box Collider.`);
+  }
+}
+function validateExtraObject(object, assetsById) {
+  for (const component of object.components) {
+    if (component.type === "box-collider") continue;
+    if (component.type !== "mesh-renderer") {
+      fail("unsupported_extra", `${object.id} must remain an Empty, an untextured primitive, or a GLB model with an optional Box Collider.`);
+    }
+    if (component.source.kind === "primitive") {
+      if (component.material.kind !== "inline" || component.material.baseColorTextureAssetId !== null) {
+        fail("unsupported_extra", `${object.id} must remain an Empty, an untextured primitive, or a GLB model with an optional Box Collider.`);
+      }
+      continue;
+    }
+    if (assetsById.get(component.source.assetId)?.format !== "glb" || component.material.kind !== "embedded") {
+      fail("unsupported_extra", `${object.id} model source must reference an existing GLB asset and keep its embedded materials.`);
+    }
+  }
+}
+function range(value, minimum, maximum) {
+  return typeof value === "number" && Number.isFinite(value) && value >= minimum && value <= maximum;
+}
+
+// cloud/zebraAssetValidation.ts
+var GLB_MAGIC = 1179937895;
+var GLB_VERSION = 2;
+var JSON_CHUNK = 1313821514;
+var BIN_CHUNK = 5130562;
+var MAX_HOSTED_GLB_BYTES = 8 * 1024 * 1024;
+var MAX_ACTIVE_HOSTED_ASSET_BYTES = 32 * 1024 * 1024;
+var MAX_JSON_BYTES = 1024 * 1024;
+var MAX_SCENES = 128;
+var MAX_NODES = 4096;
+var MAX_MESHES = 2048;
+var MAX_PRIMITIVES = 8192;
+var MAX_ACCESSORS = 16384;
+var MAX_ACCESSOR_ELEMENTS = 4e6;
+var MAX_TOTAL_DRAW_ELEMENTS = 8e6;
+var MAX_TOTAL_TRIANGLES = 2e6;
+var MAX_BUFFER_VIEWS = 16384;
+var MAX_IMAGES = 256;
+var MAX_TEXTURES = 256;
+var MAX_SAMPLERS = 256;
+var MAX_MATERIALS = 1024;
+var MAX_ANIMATIONS = 256;
+var MAX_ANIMATION_SAMPLERS = 4096;
+var MAX_ANIMATION_CHANNELS = 4096;
+var MAX_SKINS = 256;
+var MAX_LIGHTS = 256;
+var MAX_REQUIRED_EXTENSIONS = 16;
+var MAX_NODE_DEPTH = 64;
+var MAX_NAME_LENGTH = 256;
+var MAX_IMAGE_DIMENSION = 4096;
+var MAX_IMAGE_PIXELS = MAX_IMAGE_DIMENSION * MAX_IMAGE_DIMENSION;
+var MAX_TOTAL_IMAGE_PIXELS = 24e6;
+var MAX_TOTAL_DECODED_IMAGE_BYTES = 96 * 1024 * 1024;
+var MAX_TOTAL_ENCODED_IMAGE_BYTES = MAX_HOSTED_GLB_BYTES;
+var SUPPORTED_REQUIRED_EXTENSIONS = /* @__PURE__ */ new Set([
+  "EXT_texture_webp",
+  "KHR_lights_punctual",
+  "KHR_materials_clearcoat",
+  "KHR_materials_pbrSpecularGlossiness",
+  "KHR_materials_transmission",
+  "KHR_materials_unlit",
+  "KHR_mesh_quantization",
+  "KHR_texture_transform"
+]);
+var SAFELY_IGNORED_OPTIONAL_EXTENSIONS = /* @__PURE__ */ new Set([
+  "KHR_materials_anisotropy",
+  "KHR_materials_dispersion",
+  "KHR_materials_emissive_strength",
+  "KHR_materials_ior",
+  "KHR_materials_iridescence",
+  "KHR_materials_sheen",
+  "KHR_materials_specular",
+  "KHR_materials_volume"
+]);
+var HostedGlbValidationError = class extends Error {
+  constructor(message) {
+    super(message);
+    this.name = "HostedGlbValidationError";
+  }
+};
+function validateHostedGlb(bytes) {
+  if (!(bytes instanceof Uint8Array) || bytes.byteLength < 20) {
+    fail2("That GLB file is empty or truncated.");
+  }
+  if (bytes.byteLength > MAX_HOSTED_GLB_BYTES) {
+    fail2("That GLB file exceeds the 8 MiB hosted upload limit.");
+  }
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  if (view.getUint32(0, true) !== GLB_MAGIC || view.getUint32(4, true) !== GLB_VERSION) {
+    fail2("That file is not a GLB 2.0 model.");
+  }
+  if (view.getUint32(8, true) !== bytes.byteLength) {
+    fail2("The GLB header length does not match the uploaded bytes.");
+  }
+  const chunks = [];
+  let offset = 12;
+  while (offset < bytes.byteLength) {
+    if (offset + 8 > bytes.byteLength) fail2("The GLB contains a truncated chunk header.");
+    const length = view.getUint32(offset, true);
+    const type = view.getUint32(offset + 4, true);
+    if (length % 4 !== 0) fail2("The GLB contains an unaligned chunk.");
+    offset += 8;
+    if (length > bytes.byteLength - offset) fail2("The GLB contains a truncated chunk.");
+    chunks.push({ type, offset, length });
+    offset += length;
+  }
+  if (offset !== bytes.byteLength || chunks.length === 0 || chunks[0].type !== JSON_CHUNK) {
+    fail2("The GLB must begin with one complete JSON chunk.");
+  }
+  if (chunks.filter((chunk) => chunk.type === JSON_CHUNK).length !== 1) {
+    fail2("The GLB must contain exactly one JSON chunk.");
+  }
+  if (chunks.filter((chunk) => chunk.type === BIN_CHUNK).length > 1) {
+    fail2("The GLB cannot contain more than one BIN chunk.");
+  }
+  if (chunks[0].length > MAX_JSON_BYTES) fail2("The GLB JSON chunk exceeds 1 MiB.");
+  let document;
+  try {
+    const source = new TextDecoder("utf-8", { fatal: true, ignoreBOM: false }).decode(bytes.subarray(chunks[0].offset, chunks[0].offset + chunks[0].length)).replace(/[\u0000\u0020]+$/g, "");
+    const parsed = JSON.parse(source);
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error("not an object");
+    document = parsed;
+  } catch {
+    fail2("The GLB JSON chunk is not valid UTF-8 JSON.");
+  }
+  const asset = record(document.asset, "The GLB asset declaration is invalid.");
+  if (asset.version !== "2.0") fail2("The GLB must declare glTF asset version 2.0.");
+  const declaredExtensions = validateDeclaredExtensions(document.extensionsUsed, document.extensionsRequired);
+  const buffers = array(document.buffers, "buffers", 64);
+  const bin = chunks.find((chunk) => chunk.type === BIN_CHUNK);
+  const bufferSources = buffers.map((value, index) => {
+    const buffer = record(value, `GLB buffer ${index} is invalid.`);
+    if (buffer.type !== void 0 && buffer.type !== "arraybuffer") {
+      fail2(`GLB buffer ${index} has an unsupported legacy buffer type.`);
+    }
+    const byteLength = safeInteger(buffer.byteLength, 1, MAX_HOSTED_GLB_BYTES, `GLB buffer ${index} length is invalid.`);
+    if (buffer.uri === void 0) {
+      if (index !== 0 || !bin) fail2(`GLB buffer ${index} is missing its embedded data.`);
+      if (byteLength > bin.length || bin.length - byteLength > 3) {
+        fail2("The GLB declares a binary buffer length that does not match its BIN chunk.");
+      }
+      return bytes.subarray(bin.offset, bin.offset + byteLength);
+    }
+    const embedded = decodeEmbeddedDataUri(buffer.uri, `GLB buffer ${index}`);
+    if (embedded.bytes.byteLength !== byteLength) {
+      fail2(`GLB buffer ${index} data does not match its declared length.`);
+    }
+    return embedded.bytes;
+  });
+  const bufferViews = array(document.bufferViews, "bufferViews", MAX_BUFFER_VIEWS);
+  const validatedBufferViews = bufferViews.map((value, index) => {
+    const bufferView = record(value, `GLB bufferView ${index} is invalid.`);
+    const bufferIndex = safeIndex(bufferView.buffer, bufferSources.length, `GLB bufferView ${index} has an invalid buffer.`);
+    const byteOffset = bufferView.byteOffset === void 0 ? 0 : safeInteger(bufferView.byteOffset, 0, MAX_HOSTED_GLB_BYTES, `GLB bufferView ${index} has an invalid offset.`);
+    const byteLength = safeInteger(bufferView.byteLength, 1, MAX_HOSTED_GLB_BYTES, `GLB bufferView ${index} has an invalid length.`);
+    const byteStride = bufferView.byteStride === void 0 ? null : safeInteger(bufferView.byteStride, 4, 252, `GLB bufferView ${index} has an invalid byte stride.`);
+    if (byteStride !== null && byteStride % 4 !== 0) fail2(`GLB bufferView ${index} has an unaligned byte stride.`);
+    if (byteOffset + byteLength > (bufferSources[bufferIndex]?.byteLength ?? -1)) {
+      fail2(`GLB bufferView ${index} exceeds its buffer.`);
+    }
+    return { bufferIndex, byteOffset, byteLength, byteStride };
+  });
+  const accessors = array(document.accessors, "accessors", MAX_ACCESSORS);
+  const validatedAccessors = accessors.map((value, index) => {
+    const accessor = record(value, `GLB accessor ${index} is invalid.`);
+    if (accessor.bufferView === void 0 || accessor.sparse !== void 0) {
+      fail2(`GLB accessor ${index} must use one non-sparse embedded bufferView.`);
+    }
+    const bufferViewIndex = safeIndex(accessor.bufferView, bufferViews.length, `GLB accessor ${index} has an invalid bufferView.`);
+    const count = safeInteger(accessor.count, 1, MAX_ACCESSOR_ELEMENTS, `GLB accessor ${index} has an invalid element count.`);
+    const componentType = safeInteger(accessor.componentType, 5120, 5126, `GLB accessor ${index} has an unsupported component type.`);
+    const componentBytes = componentByteLength(componentType, `GLB accessor ${index} has an unsupported component type.`);
+    const type = accessorTypeName(accessor.type, `GLB accessor ${index} has an unsupported accessor type.`);
+    const componentCount = accessorComponentCount(type, `GLB accessor ${index} has an unsupported accessor type.`);
+    const elementBytes = componentBytes * componentCount;
+    const byteOffset = accessor.byteOffset === void 0 ? 0 : safeInteger(accessor.byteOffset, 0, MAX_HOSTED_GLB_BYTES, `GLB accessor ${index} has an invalid byte offset.`);
+    const view2 = validatedBufferViews[bufferViewIndex];
+    const stride = view2.byteStride ?? elementBytes;
+    if (byteOffset % componentBytes !== 0 || (view2.byteOffset + byteOffset) % componentBytes !== 0) {
+      fail2(`GLB accessor ${index} is not aligned for its component type.`);
+    }
+    if (stride < elementBytes || stride % componentBytes !== 0 || byteOffset + (count - 1) * stride + elementBytes > view2.byteLength) {
+      fail2(`GLB accessor ${index} exceeds its bufferView.`);
+    }
+    if (view2.byteStride !== null && view2.byteStride !== elementBytes) {
+      const loaderSliceStart = Math.floor(byteOffset / stride) * stride;
+      if (loaderSliceStart + count * stride > view2.byteLength) {
+        fail2(`GLB accessor ${index} exceeds the Three.js r128 interleaved buffer span.`);
+      }
+    }
+    if (accessor.normalized !== void 0 && typeof accessor.normalized !== "boolean") {
+      fail2(`GLB accessor ${index} has an invalid normalized flag.`);
+    }
+    if (accessor.normalized === true && ![5120, 5121, 5122, 5123].includes(componentType)) {
+      fail2(`GLB accessor ${index} uses normalization with an unsupported component type.`);
+    }
+    validateAccessorBounds(accessor.min, componentCount, `GLB accessor ${index} min`);
+    validateAccessorBounds(accessor.max, componentCount, `GLB accessor ${index} max`);
+    return {
+      bufferViewIndex,
+      count,
+      componentType,
+      componentBytes,
+      type,
+      normalized: accessor.normalized === true
+    };
+  });
+  const images = array(document.images, "images", MAX_IMAGES);
+  let totalEncodedImageBytes = 0;
+  let totalImagePixels = 0;
+  let totalDecodedImageBytes = 0;
+  const imageInspections = images.map((value, index) => {
+    const label = `GLB image ${index}`;
+    const image = record(value, `${label} is invalid.`);
+    if (image.uri !== void 0 && image.bufferView !== void 0) {
+      fail2(`${label} cannot define both a URI and a bufferView.`);
+    }
+    let declaredMime;
+    let imageBytes;
+    if (image.uri !== void 0) {
+      const embedded = decodeEmbeddedDataUri(image.uri, label);
+      declaredMime = hostedImageMime(embedded.mimeType, `${label} has an unsupported embedded image type.`);
+      if (image.mimeType !== void 0 && hostedImageMime(image.mimeType, `${label} has an unsupported MIME type.`) !== declaredMime) {
+        fail2(`${label} MIME declarations do not match.`);
+      }
+      imageBytes = embedded.bytes;
+    } else if (image.bufferView !== void 0) {
+      declaredMime = hostedImageMime(image.mimeType, `${label} has an unsupported embedded image type.`);
+      const bufferViewIndex = safeIndex(image.bufferView, validatedBufferViews.length, `${label} has an invalid bufferView.`);
+      const source = validatedBufferViews[bufferViewIndex];
+      imageBytes = bufferSources[source.bufferIndex].subarray(source.byteOffset, source.byteOffset + source.byteLength);
+    } else {
+      fail2(`${label} has no embedded data.`);
+    }
+    const inspection = inspectEmbeddedImage(imageBytes, label);
+    if (inspection.mimeType !== declaredMime) fail2(`${label} bytes do not match its declared MIME type.`);
+    totalEncodedImageBytes += imageBytes.byteLength;
+    totalImagePixels += inspection.pixels;
+    totalDecodedImageBytes += inspection.pixels * 4;
+    if (!Number.isSafeInteger(totalEncodedImageBytes) || totalEncodedImageBytes > MAX_TOTAL_ENCODED_IMAGE_BYTES) {
+      fail2("The GLB embedded image payloads exceed the hosted encoded-byte limit.");
+    }
+    if (!Number.isSafeInteger(totalImagePixels) || totalImagePixels > MAX_TOTAL_IMAGE_PIXELS || !Number.isSafeInteger(totalDecodedImageBytes) || totalDecodedImageBytes > MAX_TOTAL_DECODED_IMAGE_BYTES) {
+      fail2("The GLB embedded images exceed the hosted decoded-pixel budget.");
+    }
+    return inspection;
+  });
+  const scenes = array(document.scenes, "scenes", MAX_SCENES);
+  if (scenes.length !== 1) {
+    fail2("The hosted GLB corridor requires exactly one scene.");
+  }
+  const nodes = array(document.nodes, "nodes", MAX_NODES);
+  const samplers = array(document.samplers, "samplers", MAX_SAMPLERS);
+  validateSamplers(samplers);
+  const textures = array(document.textures, "textures", MAX_TEXTURES);
+  validateTextures(textures, imageInspections, samplers.length, declaredExtensions);
+  const materials = array(document.materials, "materials", MAX_MATERIALS);
+  validateMaterials(materials, textures.length, declaredExtensions);
+  const animations = array(document.animations, "animations", MAX_ANIMATIONS);
+  const skins = array(document.skins, "skins", MAX_SKINS);
+  const cameras = array(document.cameras, "cameras", MAX_NODES);
+  validateCameras(cameras);
+  const lightCount = validatePunctualLights(document.extensions, declaredExtensions);
+  const meshes = array(document.meshes, "meshes", MAX_MESHES);
+  if (meshes.length === 0) fail2("The GLB does not contain an editable mesh.");
+  const meshInspection = validateMeshes(meshes, validatedAccessors, materials.length, declaredExtensions);
+  validateSkins(skins, nodes.length, validatedAccessors);
+  validateNodeGraph(document.scene, scenes, nodes, meshInspection.meshes, skins.length, cameras.length, lightCount);
+  validateAnimations(animations, nodes, validatedAccessors, meshInspection.meshes);
+  return {
+    bytes: bytes.byteLength,
+    jsonBytes: chunks[0].length,
+    nodes: nodes.length,
+    meshes: meshes.length,
+    primitives: meshInspection.primitiveCount,
+    accessors: accessors.length,
+    drawElements: meshInspection.drawElements,
+    triangles: meshInspection.triangles,
+    images: images.length
+  };
+}
+function validateDeclaredExtensions(extensionsUsed, extensionsRequired) {
+  const used = extensionSet(extensionsUsed, "extensionsUsed");
+  const required = extensionSet(extensionsRequired, "extensionsRequired");
+  for (const extension of required) {
+    if (!used.has(extension)) fail2(`The GLB required extension ${extension} is not listed in extensionsUsed.`);
+    if (!SUPPORTED_REQUIRED_EXTENSIONS.has(extension)) {
+      fail2(`The GLB requires unsupported extension ${extension}.`);
+    }
+  }
+  for (const extension of used) {
+    if (!SUPPORTED_REQUIRED_EXTENSIONS.has(extension) && !SAFELY_IGNORED_OPTIONAL_EXTENSIONS.has(extension)) {
+      fail2(`The GLB uses unsupported extension ${extension}.`);
+    }
+  }
+  return { used, required };
+}
+function extensionSet(value, label) {
+  const declared = array(value, label, MAX_REQUIRED_EXTENSIONS);
+  const result = /* @__PURE__ */ new Set();
+  for (const extension of declared) {
+    if (typeof extension !== "string" || !/^[A-Za-z0-9_]{1,96}$/.test(extension)) {
+      fail2(`The GLB ${label} collection contains an invalid extension name.`);
+    }
+    if (result.has(extension)) fail2(`The GLB ${label} collection repeats extension ${extension}.`);
+    result.add(extension);
+  }
+  return result;
+}
+function decodeEmbeddedDataUri(value, label) {
+  if (typeof value !== "string" || !value.toLowerCase().startsWith("data:")) {
+    fail2(`${label} uses an external URI. Hosted GLBs must be self-contained.`);
+  }
+  const match = /^data:([^;,\s]{1,96});base64,((?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?)$/i.exec(value);
+  if (!match) fail2(`${label} must use one complete base64 data URI.`);
+  let binary;
+  try {
+    binary = atob(match[2]);
+  } catch {
+    fail2(`${label} contains invalid base64 data.`);
+  }
+  const bytes = new Uint8Array(binary.length);
+  for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index);
+  return { mimeType: match[1].toLowerCase(), bytes };
+}
+function hostedImageMime(value, message) {
+  if (value === "image/png" || value === "image/jpeg" || value === "image/webp") return value;
+  fail2(message);
+}
+function validateTextures(values, images, samplerCount, extensions) {
+  values.forEach((value, index) => {
+    const texture = record(value, `GLB texture ${index} is invalid.`);
+    validateOptionalName(texture.name, `GLB texture ${index} name`);
+    if (texture.sampler !== void 0) {
+      safeIndex(texture.sampler, samplerCount, `GLB texture ${index} has an invalid sampler.`);
+    }
+    const sourceIndex = texture.source === void 0 ? null : safeIndex(texture.source, images.length, `GLB texture ${index} has an invalid image source.`);
+    const extensionRecord = texture.extensions === void 0 ? null : record(texture.extensions, `GLB texture ${index} extensions are invalid.`);
+    if (extensionRecord) {
+      for (const name of Object.keys(extensionRecord)) {
+        if (name !== "EXT_texture_webp") fail2(`GLB texture ${index} uses unsupported texture extension ${name}.`);
+      }
+    }
+    const webpValue = extensionRecord?.EXT_texture_webp;
+    if (webpValue !== void 0) {
+      if (!extensions.used.has("EXT_texture_webp")) {
+        fail2(`GLB texture ${index} uses EXT_texture_webp without declaring it.`);
+      }
+      const webp = record(webpValue, `GLB texture ${index} has an invalid EXT_texture_webp value.`);
+      const webpSource = safeIndex(webp.source, images.length, `GLB texture ${index} has an invalid WebP image source.`);
+      if (images[webpSource].mimeType !== "image/webp") fail2(`GLB texture ${index} WebP source is not a WebP image.`);
+      if (!extensions.required.has("EXT_texture_webp") && sourceIndex === null) {
+        fail2(`GLB texture ${index} optional WebP source has no core PNG/JPEG/WebP fallback.`);
+      }
+    }
+    if (sourceIndex === null && webpValue === void 0) fail2(`GLB texture ${index} has no supported image source.`);
+  });
+}
+function validateSamplers(values) {
+  const magnificationFilters = /* @__PURE__ */ new Set([9728, 9729]);
+  const minificationFilters = /* @__PURE__ */ new Set([9728, 9729, 9984, 9985, 9986, 9987]);
+  const wrappingModes = /* @__PURE__ */ new Set([33071, 33648, 10497]);
+  values.forEach((value, index) => {
+    const sampler = record(value, `GLB sampler ${index} is invalid.`);
+    if (sampler.magFilter !== void 0 && (!Number.isSafeInteger(sampler.magFilter) || !magnificationFilters.has(Number(sampler.magFilter)))) {
+      fail2(`GLB sampler ${index} has an invalid magnification filter.`);
+    }
+    if (sampler.minFilter !== void 0 && (!Number.isSafeInteger(sampler.minFilter) || !minificationFilters.has(Number(sampler.minFilter)))) {
+      fail2(`GLB sampler ${index} has an invalid minification filter.`);
+    }
+    if (sampler.wrapS !== void 0 && (!Number.isSafeInteger(sampler.wrapS) || !wrappingModes.has(Number(sampler.wrapS)))) {
+      fail2(`GLB sampler ${index} has an invalid horizontal wrapping mode.`);
+    }
+    if (sampler.wrapT !== void 0 && (!Number.isSafeInteger(sampler.wrapT) || !wrappingModes.has(Number(sampler.wrapT)))) {
+      fail2(`GLB sampler ${index} has an invalid vertical wrapping mode.`);
+    }
+  });
+}
+function validateMaterials(values, textureCount, extensions) {
+  values.forEach((value, index) => {
+    const label = `GLB material ${index}`;
+    const material = record(value, `${label} is invalid.`);
+    validateOptionalName(material.name, `${label} name`);
+    if (material.pbrMetallicRoughness !== void 0) {
+      const pbr = record(material.pbrMetallicRoughness, `${label} has invalid metallic-roughness data.`);
+      validateFactorVector(pbr.baseColorFactor, 4, 0, 1, `${label} base colour factor`);
+      validateUnitFactor(pbr.metallicFactor, `${label} metallic factor`);
+      validateUnitFactor(pbr.roughnessFactor, `${label} roughness factor`);
+      if (pbr.baseColorTexture !== void 0) {
+        validateTextureInfo(pbr.baseColorTexture, textureCount, extensions, `${label} base colour texture`);
+      }
+      if (pbr.metallicRoughnessTexture !== void 0) {
+        validateTextureInfo(pbr.metallicRoughnessTexture, textureCount, extensions, `${label} metallic-roughness texture`);
+      }
+    }
+    if (material.normalTexture !== void 0) {
+      const normal = validateTextureInfo(material.normalTexture, textureCount, extensions, `${label} normal texture`);
+      validateFiniteOptional(normal.scale, `${label} normal scale`);
+    }
+    if (material.occlusionTexture !== void 0) {
+      const occlusion = validateTextureInfo(material.occlusionTexture, textureCount, extensions, `${label} occlusion texture`);
+      validateUnitFactor(occlusion.strength, `${label} occlusion strength`);
+    }
+    if (material.emissiveTexture !== void 0) {
+      validateTextureInfo(material.emissiveTexture, textureCount, extensions, `${label} emissive texture`);
+    }
+    validateFactorVector(material.emissiveFactor, 3, 0, Number.MAX_VALUE, `${label} emissive factor`);
+    if (material.alphaMode !== void 0 && !["OPAQUE", "MASK", "BLEND"].includes(String(material.alphaMode))) {
+      fail2(`${label} has an invalid alpha mode.`);
+    }
+    validateUnitFactor(material.alphaCutoff, `${label} alpha cutoff`);
+    if (material.doubleSided !== void 0 && typeof material.doubleSided !== "boolean") {
+      fail2(`${label} has an invalid double-sided flag.`);
+    }
+    if (material.extensions === void 0) return;
+    const materialExtensions = record(material.extensions, `${label} extensions are invalid.`);
+    for (const [name, extensionValue] of Object.entries(materialExtensions)) {
+      if (!extensions.used.has(name)) fail2(`${label} uses undeclared extension ${name}.`);
+      if (SAFELY_IGNORED_OPTIONAL_EXTENSIONS.has(name)) {
+        record(extensionValue, `${label} extension ${name} is invalid.`);
+        continue;
+      }
+      if (name === "KHR_materials_unlit") {
+        record(extensionValue, `${label} has invalid unlit data.`);
+        continue;
+      }
+      if (name === "KHR_materials_clearcoat") {
+        const clearcoat = record(extensionValue, `${label} has invalid clearcoat data.`);
+        validateUnitFactor(clearcoat.clearcoatFactor, `${label} clearcoat factor`);
+        validateUnitFactor(clearcoat.clearcoatRoughnessFactor, `${label} clearcoat roughness factor`);
+        if (clearcoat.clearcoatTexture !== void 0) {
+          validateTextureInfo(clearcoat.clearcoatTexture, textureCount, extensions, `${label} clearcoat texture`);
+        }
+        if (clearcoat.clearcoatRoughnessTexture !== void 0) {
+          validateTextureInfo(clearcoat.clearcoatRoughnessTexture, textureCount, extensions, `${label} clearcoat roughness texture`);
+        }
+        if (clearcoat.clearcoatNormalTexture !== void 0) {
+          const normal = validateTextureInfo(clearcoat.clearcoatNormalTexture, textureCount, extensions, `${label} clearcoat normal texture`);
+          validateFiniteOptional(normal.scale, `${label} clearcoat normal scale`);
+        }
+        continue;
+      }
+      if (name === "KHR_materials_transmission") {
+        const transmission = record(extensionValue, `${label} has invalid transmission data.`);
+        validateUnitFactor(transmission.transmissionFactor, `${label} transmission factor`);
+        if (transmission.transmissionTexture !== void 0) {
+          validateTextureInfo(transmission.transmissionTexture, textureCount, extensions, `${label} transmission texture`);
+        }
+        continue;
+      }
+      if (name === "KHR_materials_pbrSpecularGlossiness") {
+        const specularGlossiness = record(extensionValue, `${label} has invalid specular-glossiness data.`);
+        validateFactorVector(specularGlossiness.diffuseFactor, 4, 0, 1, `${label} diffuse factor`);
+        validateFactorVector(specularGlossiness.specularFactor, 3, 0, 1, `${label} specular factor`);
+        validateUnitFactor(specularGlossiness.glossinessFactor, `${label} glossiness factor`);
+        if (specularGlossiness.diffuseTexture !== void 0) {
+          validateTextureInfo(specularGlossiness.diffuseTexture, textureCount, extensions, `${label} diffuse texture`);
+        }
+        if (specularGlossiness.specularGlossinessTexture !== void 0) {
+          validateTextureInfo(specularGlossiness.specularGlossinessTexture, textureCount, extensions, `${label} specular-glossiness texture`);
+        }
+        continue;
+      }
+      fail2(`${label} uses unsupported material extension ${name}.`);
+    }
+  });
+}
+function validateTextureInfo(value, textureCount, extensions, label) {
+  const info = record(value, `${label} is invalid.`);
+  safeIndex(info.index, textureCount, `${label} has an invalid texture index.`);
+  if (info.texCoord !== void 0) safeInteger(info.texCoord, 0, 1, `${label} uses an unsupported UV set.`);
+  if (info.extensions === void 0) return info;
+  const infoExtensions = record(info.extensions, `${label} extensions are invalid.`);
+  for (const [name, extensionValue] of Object.entries(infoExtensions)) {
+    if (name !== "KHR_texture_transform" || !extensions.used.has(name)) {
+      fail2(`${label} uses unsupported or undeclared texture extension ${name}.`);
+    }
+    const transform = record(extensionValue, `${label} texture transform is invalid.`);
+    validateFactorVector(transform.offset, 2, -Number.MAX_VALUE, Number.MAX_VALUE, `${label} texture offset`);
+    validateFactorVector(transform.scale, 2, -Number.MAX_VALUE, Number.MAX_VALUE, `${label} texture scale`);
+    validateFiniteOptional(transform.rotation, `${label} texture rotation`);
+    if (transform.texCoord !== void 0) safeInteger(transform.texCoord, 0, 1, `${label} texture transform uses an unsupported UV set.`);
+  }
+  return info;
+}
+function validateCameras(values) {
+  values.forEach((value, index) => {
+    const camera = record(value, `GLB camera ${index} is invalid.`);
+    validateOptionalName(camera.name, `GLB camera ${index} name`);
+    if (camera.type === "perspective") {
+      const perspective = record(camera.perspective, `GLB camera ${index} perspective parameters are invalid.`);
+      const yfov = requiredFinite(perspective.yfov, `GLB camera ${index} has an invalid vertical field of view.`);
+      const near = requiredFinite(perspective.znear, `GLB camera ${index} has an invalid near plane.`);
+      if (yfov <= 0 || yfov >= Math.PI || near <= 0) fail2(`GLB camera ${index} has invalid perspective limits.`);
+      const far = perspective.zfar === void 0 ? null : requiredFinite(perspective.zfar, `GLB camera ${index} has an invalid far plane.`);
+      if (far !== null && far <= near) fail2(`GLB camera ${index} has an invalid far plane.`);
+      if (perspective.aspectRatio !== void 0 && requiredFinite(perspective.aspectRatio, `GLB camera ${index} has an invalid aspect ratio.`) <= 0) {
+        fail2(`GLB camera ${index} has an invalid aspect ratio.`);
+      }
+      return;
+    }
+    if (camera.type === "orthographic") {
+      const orthographic = record(camera.orthographic, `GLB camera ${index} orthographic parameters are invalid.`);
+      const xmag = requiredFinite(orthographic.xmag, `GLB camera ${index} has an invalid horizontal magnification.`);
+      const ymag = requiredFinite(orthographic.ymag, `GLB camera ${index} has an invalid vertical magnification.`);
+      const near = requiredFinite(orthographic.znear, `GLB camera ${index} has an invalid near plane.`);
+      const far = requiredFinite(orthographic.zfar, `GLB camera ${index} has an invalid far plane.`);
+      if (xmag <= 0 || ymag <= 0 || near < 0 || far <= near) fail2(`GLB camera ${index} has invalid orthographic limits.`);
+      return;
+    }
+    fail2(`GLB camera ${index} has an unsupported projection type.`);
+  });
+}
+function validatePunctualLights(extensionValue, extensions) {
+  if (extensionValue === void 0) return 0;
+  const rootExtensions = record(extensionValue, "The GLB top-level extensions are invalid.");
+  const punctualValue = rootExtensions.KHR_lights_punctual;
+  if (punctualValue === void 0) return 0;
+  if (!extensions.used.has("KHR_lights_punctual")) {
+    fail2("The GLB uses undeclared extension KHR_lights_punctual.");
+  }
+  const punctual = record(punctualValue, "The GLB punctual-light extension is invalid.");
+  const lights = array(punctual.lights, "punctual lights", MAX_LIGHTS);
+  lights.forEach((value, index) => {
+    const light = record(value, `GLB punctual light ${index} is invalid.`);
+    validateOptionalName(light.name, `GLB punctual light ${index} name`);
+    if (!["directional", "point", "spot"].includes(String(light.type))) {
+      fail2(`GLB punctual light ${index} has an unsupported type.`);
+    }
+    validateFactorVector(light.color, 3, 0, Number.MAX_VALUE, `GLB punctual light ${index} colour`);
+    if (light.intensity !== void 0 && requiredFinite(light.intensity, `GLB punctual light ${index} has an invalid intensity.`) < 0) {
+      fail2(`GLB punctual light ${index} has an invalid intensity.`);
+    }
+    if (light.range !== void 0 && requiredFinite(light.range, `GLB punctual light ${index} has an invalid range.`) <= 0) {
+      fail2(`GLB punctual light ${index} has an invalid range.`);
+    }
+    if (light.type !== "spot") {
+      if (light.spot !== void 0) fail2(`GLB punctual light ${index} defines spot data for a non-spot light.`);
+      return;
+    }
+    if (light.spot === void 0) return;
+    const spot = record(light.spot, `GLB punctual light ${index} spot data is invalid.`);
+    const inner = spot.innerConeAngle === void 0 ? 0 : requiredFinite(spot.innerConeAngle, `GLB punctual light ${index} has an invalid inner cone.`);
+    const outer = spot.outerConeAngle === void 0 ? Math.PI / 4 : requiredFinite(spot.outerConeAngle, `GLB punctual light ${index} has an invalid outer cone.`);
+    if (inner < 0 || outer <= 0 || outer > Math.PI / 2 || inner > outer) {
+      fail2(`GLB punctual light ${index} has invalid spot-cone limits.`);
+    }
+  });
+  return lights.length;
+}
+function validateMeshes(values, accessors, materialCount, extensions) {
+  let primitiveCount = 0;
+  let drawElements = 0;
+  let triangles = 0;
+  const meshes = values.map((value, meshIndex) => {
+    const mesh = record(value, `GLB mesh ${meshIndex} is invalid.`);
+    validateOptionalName(mesh.name, `GLB mesh ${meshIndex} name`);
+    if (mesh.isSkinnedMesh !== void 0) {
+      fail2(`GLB mesh ${meshIndex} contains a reserved loader-internal isSkinnedMesh field.`);
+    }
+    const primitives = array(mesh.primitives, `mesh ${meshIndex} primitives`, MAX_PRIMITIVES);
+    if (primitives.length === 0) fail2(`GLB mesh ${meshIndex} has no primitives.`);
+    primitiveCount += primitives.length;
+    if (primitiveCount > MAX_PRIMITIVES) fail2(`The GLB contains more than ${MAX_PRIMITIVES} mesh primitives.`);
+    let meshMorphTargetCount = null;
+    let meshMorphSemanticKey = null;
+    let hasSkinAttributes = true;
+    for (let primitiveIndex = 0; primitiveIndex < primitives.length; primitiveIndex += 1) {
+      const label = `GLB mesh ${meshIndex} primitive ${primitiveIndex}`;
+      const primitive = record(primitives[primitiveIndex], `${label} is invalid.`);
+      const attributes = record(primitive.attributes, `${label} attributes are invalid.`);
+      const attributeEntries = Object.entries(attributes);
+      if (attributeEntries.length === 0 || attributeEntries.length > 32) {
+        fail2(`${label} has an invalid attribute count.`);
+      }
+      const positionIndex = attributes.POSITION;
+      if (!Number.isSafeInteger(positionIndex)) fail2(`${label} has no POSITION accessor.`);
+      const validatedPositionIndex = safeIndex(positionIndex, accessors.length, `${label} has an invalid POSITION attribute accessor.`);
+      const position = accessors[validatedPositionIndex];
+      validateAttributeAccessor("POSITION", position, extensions, `${label} POSITION`);
+      for (const [semantic, accessorValue] of attributeEntries) {
+        if (!/^(?:[A-Z][A-Z0-9_]*|_[A-Za-z0-9_]+)$/.test(semantic)) {
+          fail2(`${label} has an invalid attribute semantic ${semantic}.`);
+        }
+        const accessorIndex = safeIndex(accessorValue, accessors.length, `${label} has an invalid ${semantic} accessor.`);
+        const accessor = accessors[accessorIndex];
+        if (accessor.count !== position.count) fail2(`${label} attribute ${semantic} does not match its POSITION count.`);
+        validateAttributeAccessor(semantic, accessor, extensions, `${label} ${semantic}`);
+      }
+      const hasJoints = attributes.JOINTS_0 !== void 0;
+      const hasWeights = attributes.WEIGHTS_0 !== void 0;
+      if (hasJoints !== hasWeights) fail2(`${label} must define JOINTS_0 and WEIGHTS_0 together.`);
+      hasSkinAttributes &&= hasJoints && hasWeights;
+      let elements = position.count;
+      if (primitive.indices !== void 0) {
+        const indexAccessor = accessors[safeIndex(primitive.indices, accessors.length, `${label} has invalid indices.`)];
+        if (indexAccessor.type !== "SCALAR" || ![5121, 5123, 5125].includes(indexAccessor.componentType) || indexAccessor.normalized) {
+          fail2(`${label} index accessor must use unsigned scalar elements.`);
+        }
+        elements = indexAccessor.count;
+      }
+      if (primitive.material !== void 0) {
+        safeIndex(primitive.material, materialCount, `${label} has an invalid material index.`);
+      }
+      const targets = array(primitive.targets, `${label} morph targets`, 32);
+      if (meshMorphTargetCount === null) meshMorphTargetCount = targets.length;
+      else if (meshMorphTargetCount !== targets.length) fail2(`GLB mesh ${meshIndex} primitives disagree on morph-target count.`);
+      targets.forEach((targetValue, targetIndex) => {
+        const target = record(targetValue, `${label} morph target ${targetIndex} is invalid.`);
+        const entries = Object.entries(target);
+        if (entries.length === 0 || entries.some(([semantic]) => !["POSITION", "NORMAL"].includes(semantic))) {
+          fail2(`${label} morph target ${targetIndex} has unsupported attributes.`);
+        }
+        const semanticKey = entries.map(([semantic]) => semantic).sort().join(",");
+        if (meshMorphSemanticKey === null) meshMorphSemanticKey = semanticKey;
+        else if (meshMorphSemanticKey !== semanticKey) {
+          fail2(`GLB mesh ${meshIndex} morph targets disagree on their attribute set.`);
+        }
+        if (entries.some(([semantic]) => semantic === "NORMAL") && attributes.NORMAL === void 0) {
+          fail2(`${label} morph target ${targetIndex} defines NORMAL without a base NORMAL attribute.`);
+        }
+        for (const [semantic, accessorValue] of entries) {
+          const accessor = accessors[safeIndex(accessorValue, accessors.length, `${label} morph target ${targetIndex} has an invalid ${semantic} accessor.`)];
+          if (accessor.count !== position.count) fail2(`${label} morph target ${targetIndex} does not match its POSITION count.`);
+          if (accessor.type !== "VEC3" || accessor.componentType !== 5126 || accessor.normalized) {
+            fail2(`${label} morph target ${targetIndex} ${semantic} accessor is unsupported.`);
+          }
+        }
+      });
+      const mode = primitive.mode === void 0 ? 4 : safeInteger(primitive.mode, 0, 6, `${label} has an invalid draw mode.`);
+      drawElements += elements;
+      triangles += mode === 4 ? Math.floor(elements / 3) : mode === 5 || mode === 6 ? Math.max(0, elements - 2) : 0;
+      if (drawElements > MAX_TOTAL_DRAW_ELEMENTS || triangles > MAX_TOTAL_TRIANGLES) {
+        fail2("The GLB geometry exceeds the hosted draw-complexity limit.");
+      }
+    }
+    const morphTargetCount = meshMorphTargetCount ?? 0;
+    if (mesh.weights !== void 0) {
+      validateFiniteArray(mesh.weights, morphTargetCount, `GLB mesh ${meshIndex} weights`);
+      if (morphTargetCount === 0) fail2(`GLB mesh ${meshIndex} defines weights without morph targets.`);
+    }
+    return { morphTargetCount, hasSkinAttributes };
+  });
+  if (primitiveCount === 0) fail2("The GLB does not contain an editable mesh primitive.");
+  return { meshes, primitiveCount, drawElements, triangles };
+}
+function validateAttributeAccessor(semantic, accessor, extensions, label) {
+  const quantized = extensions.used.has("KHR_mesh_quantization");
+  if (semantic === "POSITION" || semantic === "NORMAL") {
+    if (accessor.type !== "VEC3" || accessor.componentType !== 5126 && !(quantized && [5120, 5121, 5122, 5123].includes(accessor.componentType))) {
+      fail2(`${label} accessor has an unsupported type.`);
+    }
+    return;
+  }
+  if (semantic === "TANGENT") {
+    if (accessor.type !== "VEC4" || accessor.componentType !== 5126 && !(quantized && [5120, 5121, 5122, 5123].includes(accessor.componentType))) {
+      fail2(`${label} accessor has an unsupported type.`);
+    }
+    return;
+  }
+  if (/^TEXCOORD_[0-9]+$/.test(semantic)) {
+    if (accessor.type !== "VEC2" || ![5121, 5123, 5126].includes(accessor.componentType)) {
+      fail2(`${label} accessor has an unsupported type.`);
+    }
+    return;
+  }
+  if (/^COLOR_[0-9]+$/.test(semantic)) {
+    if (!["VEC3", "VEC4"].includes(accessor.type) || ![5121, 5123, 5126].includes(accessor.componentType)) {
+      fail2(`${label} accessor has an unsupported type.`);
+    }
+    return;
+  }
+  if (/^JOINTS_[0-9]+$/.test(semantic)) {
+    if (accessor.type !== "VEC4" || ![5121, 5123].includes(accessor.componentType) || accessor.normalized) {
+      fail2(`${label} accessor has an unsupported type.`);
+    }
+    return;
+  }
+  if (/^WEIGHTS_[0-9]+$/.test(semantic)) {
+    if (accessor.type !== "VEC4" || ![5121, 5123, 5126].includes(accessor.componentType) || accessor.componentType !== 5126 && !accessor.normalized) {
+      fail2(`${label} accessor has an unsupported type.`);
+    }
+    return;
+  }
+  if (!semantic.startsWith("_")) fail2(`${label} uses an unsupported attribute semantic.`);
+}
+function validateSkins(values, nodeCount, accessors) {
+  values.forEach((value, index) => {
+    const skin = record(value, `GLB skin ${index} is invalid.`);
+    const joints = array(skin.joints, `skin ${index} joints`, MAX_NODES);
+    if (joints.length === 0) fail2(`GLB skin ${index} has no joints.`);
+    const uniqueJoints = /* @__PURE__ */ new Set();
+    for (const joint of joints) {
+      const nodeIndex = safeIndex(joint, nodeCount, `GLB skin ${index} has an invalid joint node.`);
+      if (uniqueJoints.has(nodeIndex)) fail2(`GLB skin ${index} repeats joint node ${nodeIndex}.`);
+      uniqueJoints.add(nodeIndex);
+    }
+    if (skin.skeleton !== void 0) safeIndex(skin.skeleton, nodeCount, `GLB skin ${index} has an invalid skeleton root.`);
+    if (skin.inverseBindMatrices !== void 0) {
+      const accessor = accessors[safeIndex(
+        skin.inverseBindMatrices,
+        accessors.length,
+        `GLB skin ${index} has invalid inverse-bind matrices.`
+      )];
+      if (accessor.type !== "MAT4" || accessor.componentType !== 5126 || accessor.normalized || accessor.count !== joints.length) {
+        fail2(`GLB skin ${index} inverse-bind matrices do not match its joints.`);
+      }
+    }
+  });
+}
+function validateAnimations(values, nodes, accessors, meshes) {
+  values.forEach((value, animationIndex) => {
+    const animation = record(value, `GLB animation ${animationIndex} is invalid.`);
+    validateOptionalName(animation.name, `GLB animation ${animationIndex} name`);
+    if (animation.parameters !== void 0) {
+      fail2(`GLB animation ${animationIndex} uses deprecated parameter indirection.`);
+    }
+    const samplers = array(animation.samplers, `animation ${animationIndex} samplers`, MAX_ANIMATION_SAMPLERS);
+    const channels = array(animation.channels, `animation ${animationIndex} channels`, MAX_ANIMATION_CHANNELS);
+    if (samplers.length === 0 || channels.length === 0) fail2(`GLB animation ${animationIndex} has no samplers or channels.`);
+    const validatedSamplers = samplers.map((samplerValue, samplerIndex) => {
+      const sampler = record(samplerValue, `GLB animation ${animationIndex} sampler ${samplerIndex} is invalid.`);
+      const input = safeIndex(sampler.input, accessors.length, `GLB animation ${animationIndex} sampler ${samplerIndex} has an invalid input accessor.`);
+      const output2 = safeIndex(sampler.output, accessors.length, `GLB animation ${animationIndex} sampler ${samplerIndex} has an invalid output accessor.`);
+      const interpolation = sampler.interpolation === void 0 ? "LINEAR" : String(sampler.interpolation);
+      if (!["LINEAR", "STEP", "CUBICSPLINE"].includes(interpolation)) {
+        fail2(`GLB animation ${animationIndex} sampler ${samplerIndex} has unsupported interpolation.`);
+      }
+      const inputAccessor = accessors[input];
+      if (inputAccessor.type !== "SCALAR" || inputAccessor.componentType !== 5126 || inputAccessor.normalized) {
+        fail2(`GLB animation ${animationIndex} sampler ${samplerIndex} input must be an unnormalized float scalar accessor.`);
+      }
+      return { input, output: output2, interpolation };
+    });
+    channels.forEach((channelValue, channelIndex) => {
+      const channel = record(channelValue, `GLB animation ${animationIndex} channel ${channelIndex} is invalid.`);
+      const samplerIndex = safeIndex(channel.sampler, validatedSamplers.length, `GLB animation ${animationIndex} channel ${channelIndex} has an invalid sampler.`);
+      const target = record(channel.target, `GLB animation ${animationIndex} channel ${channelIndex} target is invalid.`);
+      if (target.id !== void 0) fail2(`GLB animation ${animationIndex} channel ${channelIndex} uses deprecated target.id.`);
+      const nodeIndex = safeIndex(target.node, nodes.length, `GLB animation ${animationIndex} channel ${channelIndex} has an invalid target node.`);
+      const path2 = String(target.path);
+      if (!["translation", "rotation", "scale", "weights"].includes(path2)) {
+        fail2(`GLB animation ${animationIndex} channel ${channelIndex} has an unsupported target path.`);
+      }
+      const sampler = validatedSamplers[samplerIndex];
+      const input = accessors[sampler.input];
+      const output2 = accessors[sampler.output];
+      if (output2.componentType !== 5126 || output2.normalized) {
+        fail2(`GLB animation ${animationIndex} channel ${channelIndex} output must use unnormalized floats.`);
+      }
+      const cubicFactor = sampler.interpolation === "CUBICSPLINE" ? 3 : 1;
+      if (path2 === "translation" || path2 === "scale") {
+        if (output2.type !== "VEC3" || output2.count !== input.count * cubicFactor) {
+          fail2(`GLB animation ${animationIndex} channel ${channelIndex} output does not match ${path2}.`);
+        }
+      } else if (path2 === "rotation") {
+        if (output2.type !== "VEC4" || output2.count !== input.count * cubicFactor) {
+          fail2(`GLB animation ${animationIndex} channel ${channelIndex} output does not match rotation.`);
+        }
+      } else {
+        const node = record(nodes[nodeIndex], `GLB animation ${animationIndex} channel ${channelIndex} target node is invalid.`);
+        if (node.mesh === void 0) fail2(`GLB animation ${animationIndex} channel ${channelIndex} weights target has no mesh.`);
+        const meshIndex = safeIndex(node.mesh, meshes.length, `GLB animation ${animationIndex} channel ${channelIndex} weights target has an invalid mesh.`);
+        const targetCount = meshes[meshIndex].morphTargetCount;
+        if (targetCount < 1 || output2.type !== "SCALAR" || output2.count !== input.count * targetCount * cubicFactor) {
+          fail2(`GLB animation ${animationIndex} channel ${channelIndex} output does not match mesh weights.`);
+        }
+      }
+    });
+  });
+}
+function validateNodeGraph(defaultSceneValue, sceneValues, nodeValues, meshes, skinCount, cameraCount, lightCount) {
+  if (sceneValues.length === 0) fail2("The GLB must contain at least one scene.");
+  if (nodeValues.length === 0) fail2("The GLB must contain at least one scene node.");
+  const defaultScene = safeIndex(defaultSceneValue, sceneValues.length, "The GLB has no valid default scene.");
+  const parents = new Int32Array(nodeValues.length);
+  parents.fill(-1);
+  const childrenByNode = [];
+  const nodeHasMesh = new Uint8Array(nodeValues.length);
+  nodeValues.forEach((value, index) => {
+    const node = record(value, `GLB node ${index} is invalid.`);
+    validateOptionalName(node.name, `GLB node ${index} name`);
+    if (node.isBone !== void 0) {
+      fail2(`GLB node ${index} contains a reserved loader-internal isBone field.`);
+    }
+    validateNodeTransform(node, index);
+    let meshIndex = null;
+    if (node.mesh !== void 0) {
+      meshIndex = safeIndex(node.mesh, meshes.length, `GLB node ${index} has an invalid mesh.`);
+      nodeHasMesh[index] = 1;
+    }
+    if (node.skin !== void 0) {
+      safeIndex(node.skin, skinCount, `GLB node ${index} has an invalid skin.`);
+      if (meshIndex === null) fail2(`GLB node ${index} defines a skin without a mesh.`);
+      if (!meshes[meshIndex].hasSkinAttributes) {
+        fail2(`GLB node ${index} uses a skin with a mesh missing JOINTS_0 or WEIGHTS_0.`);
+      }
+    }
+    if (node.camera !== void 0) safeIndex(node.camera, cameraCount, `GLB node ${index} has an invalid camera.`);
+    if (node.weights !== void 0) {
+      if (meshIndex === null || meshes[meshIndex].morphTargetCount === 0) {
+        fail2(`GLB node ${index} defines weights without a morph-target mesh.`);
+      }
+      validateFiniteArray(node.weights, meshes[meshIndex].morphTargetCount, `GLB node ${index} weights`);
+    }
+    if (node.extensions !== void 0) {
+      const nodeExtensions = record(node.extensions, `GLB node ${index} extensions are invalid.`);
+      for (const [name, extensionValue] of Object.entries(nodeExtensions)) {
+        if (name !== "KHR_lights_punctual") fail2(`GLB node ${index} uses unsupported structural extension ${name}.`);
+        const light = record(extensionValue, `GLB node ${index} punctual-light attachment is invalid.`);
+        safeIndex(light.light, lightCount, `GLB node ${index} has an invalid punctual light.`);
+      }
+    }
+    const children = array(node.children, `node ${index} children`, MAX_NODES).map((child) => safeIndex(child, nodeValues.length, `GLB node ${index} has an invalid child.`));
+    const local = /* @__PURE__ */ new Set();
+    for (const child of children) {
+      if (local.has(child)) fail2(`GLB node ${index} repeats child node ${child}.`);
+      local.add(child);
+      if (parents[child] !== -1) fail2(`GLB node ${child} has more than one parent.`);
+      parents[child] = index;
+    }
+    childrenByNode.push(children);
+  });
+  const visitState = new Uint8Array(nodeValues.length);
+  for (let start = 0; start < nodeValues.length; start += 1) {
+    if (visitState[start] !== 0) continue;
+    const stack = [{ id: start, nextChild: 0 }];
+    visitState[start] = 1;
+    while (stack.length) {
+      const frame = stack[stack.length - 1];
+      const children = childrenByNode[frame.id];
+      if (frame.nextChild >= children.length) {
+        visitState[frame.id] = 2;
+        stack.pop();
+        continue;
+      }
+      const child = children[frame.nextChild];
+      frame.nextChild += 1;
+      if (visitState[child] === 1) fail2(`The GLB node graph contains a cycle at node ${child}.`);
+      if (visitState[child] === 0) {
+        visitState[child] = 1;
+        stack.push({ id: child, nextChild: 0 });
+      }
+    }
+  }
+  const rootsByScene = sceneValues.map((value, index) => {
+    const scene = record(value, `GLB scene ${index} is invalid.`);
+    validateOptionalName(scene.name, `GLB scene ${index} name`);
+    const roots = array(scene.nodes, `scene ${index} roots`, MAX_NODES).map((root) => safeIndex(root, nodeValues.length, `GLB scene ${index} has an invalid root node.`));
+    if (new Set(roots).size !== roots.length) fail2(`GLB scene ${index} repeats a root node.`);
+    for (const root of roots) {
+      if (parents[root] !== -1) fail2(`GLB scene ${index} references non-root node ${root} as a root.`);
+    }
+    return roots;
+  });
+  if (rootsByScene[defaultScene].length === 0) fail2("The GLB default scene must contain at least one root node.");
+  const reachable = new Uint8Array(nodeValues.length);
+  let reachableCount = 0;
+  for (const roots of rootsByScene) {
+    const stack = roots.map((id) => ({ id, depth: 1 }));
+    while (stack.length) {
+      const { id, depth } = stack.pop();
+      if (depth > MAX_NODE_DEPTH) fail2(`The GLB node graph exceeds the maximum depth of ${MAX_NODE_DEPTH}.`);
+      if (reachable[id]) continue;
+      reachable[id] = 1;
+      reachableCount += 1;
+      for (const child of childrenByNode[id]) stack.push({ id: child, depth: depth + 1 });
+    }
+  }
+  if (reachableCount !== nodeValues.length) fail2("The GLB contains a node that is unreachable from every scene.");
+  let defaultHasMesh = false;
+  const defaultVisited = new Uint8Array(nodeValues.length);
+  const defaultStack = [...rootsByScene[defaultScene]];
+  while (defaultStack.length) {
+    const id = defaultStack.pop();
+    if (defaultVisited[id]) continue;
+    defaultVisited[id] = 1;
+    if (nodeHasMesh[id]) defaultHasMesh = true;
+    defaultStack.push(...childrenByNode[id]);
+  }
+  if (!defaultHasMesh) fail2("The GLB default scene does not contain an editable mesh.");
+}
+function validateNodeTransform(node, index) {
+  if (node.matrix !== void 0) {
+    if (node.translation !== void 0 || node.rotation !== void 0 || node.scale !== void 0) {
+      fail2(`GLB node ${index} cannot define both a matrix and TRS transforms.`);
+    }
+    validateFiniteArray(node.matrix, 16, `GLB node ${index} matrix`);
+    return;
+  }
+  validateFiniteArray(node.translation, 3, `GLB node ${index} translation`);
+  validateFiniteArray(node.rotation, 4, `GLB node ${index} rotation`);
+  validateFiniteArray(node.scale, 3, `GLB node ${index} scale`);
+  if (node.rotation !== void 0) {
+    const rotation = node.rotation;
+    const magnitude = rotation.reduce((total, value) => total + value * value, 0);
+    if (!Number.isFinite(magnitude) || magnitude < 1e-12) fail2(`GLB node ${index} has an invalid zero quaternion.`);
+  }
+}
+function inspectEmbeddedImage(bytes, label) {
+  if (bytes.byteLength === 0) fail2(`${label} is empty.`);
+  let dimensions;
+  if (hasBytes(bytes, 0, [137, 80, 78, 71, 13, 10, 26, 10])) {
+    dimensions = inspectPng(bytes, label);
+  } else if (hasBytes(bytes, 0, [255, 216])) {
+    dimensions = inspectJpeg(bytes, label);
+  } else if (ascii(bytes, 0, 4) === "RIFF" && ascii(bytes, 8, 4) === "WEBP") {
+    dimensions = inspectWebp(bytes, label);
+  } else {
+    fail2(`${label} does not contain a valid PNG, JPEG, or WebP image.`);
+  }
+  const pixels = dimensions.width * dimensions.height;
+  if (!Number.isSafeInteger(pixels) || dimensions.width < 1 || dimensions.height < 1 || dimensions.width > MAX_IMAGE_DIMENSION || dimensions.height > MAX_IMAGE_DIMENSION || pixels > MAX_IMAGE_PIXELS) {
+    fail2(`${label} dimensions exceed the hosted image limit.`);
+  }
+  return { ...dimensions, pixels };
+}
+function inspectPng(bytes, label) {
+  if (bytes.byteLength < 45) fail2(`${label} PNG data is truncated.`);
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  let offset = 8;
+  let chunkIndex = 0;
+  let width = 0;
+  let height = 0;
+  let colorType = -1;
+  let sawPalette = false;
+  let sawImageData = false;
+  let sawEnd = false;
+  while (offset < bytes.byteLength) {
+    if (offset + 12 > bytes.byteLength) fail2(`${label} PNG contains a truncated chunk.`);
+    const chunkLength = view.getUint32(offset, false);
+    const type = ascii(bytes, offset + 4, 4);
+    if (!/^[A-Za-z]{4}$/.test(type) || chunkLength > bytes.byteLength - offset - 12) {
+      fail2(`${label} PNG contains an invalid chunk.`);
+    }
+    const dataStart = offset + 8;
+    const dataEnd = dataStart + chunkLength;
+    const storedCrc = view.getUint32(dataEnd, false);
+    if (pngCrc322(bytes, offset + 4, dataEnd) !== storedCrc) fail2(`${label} PNG contains a corrupt chunk.`);
+    if (chunkIndex === 0 && type !== "IHDR") fail2(`${label} PNG does not begin with IHDR.`);
+    if (type === "IHDR") {
+      if (chunkIndex !== 0 || chunkLength !== 13) fail2(`${label} PNG has an invalid IHDR chunk.`);
+      width = view.getUint32(dataStart, false);
+      height = view.getUint32(dataStart + 4, false);
+      const bitDepth = bytes[dataStart + 8];
+      colorType = bytes[dataStart + 9];
+      const validBitDepth = colorType === 0 ? [1, 2, 4, 8, 16].includes(bitDepth) : colorType === 2 ? [8, 16].includes(bitDepth) : colorType === 3 ? [1, 2, 4, 8].includes(bitDepth) : colorType === 4 || colorType === 6 ? [8, 16].includes(bitDepth) : false;
+      if (!validBitDepth || bytes[dataStart + 10] !== 0 || bytes[dataStart + 11] !== 0 || bytes[dataStart + 12] !== 0 && bytes[dataStart + 12] !== 1) {
+        fail2(`${label} PNG has unsupported image parameters.`);
+      }
+    } else if (type === "PLTE") {
+      if (sawImageData || chunkLength === 0 || chunkLength % 3 !== 0 || chunkLength > 768) {
+        fail2(`${label} PNG has an invalid palette.`);
+      }
+      sawPalette = true;
+    } else if (type === "IDAT") {
+      if (chunkLength > 0) sawImageData = true;
+    } else if (type === "IEND") {
+      if (chunkLength !== 0 || !sawImageData) fail2(`${label} PNG has an invalid IEND chunk.`);
+      sawEnd = true;
+      offset = dataEnd + 4;
+      if (offset !== bytes.byteLength) fail2(`${label} PNG contains trailing data after IEND.`);
+      break;
+    } else if (type === "acTL" || type === "fcTL" || type === "fdAT") {
+      fail2(`${label} uses animated PNG data, which hosted textures do not support.`);
+    } else if ((type.charCodeAt(0) & 32) === 0) {
+      fail2(`${label} PNG uses unsupported critical chunk ${type}.`);
+    }
+    offset = dataEnd + 4;
+    chunkIndex += 1;
+  }
+  if (!sawEnd || width < 1 || height < 1 || colorType === 3 && !sawPalette) {
+    fail2(`${label} PNG is incomplete.`);
+  }
+  return { mimeType: "image/png", width, height };
+}
+function inspectJpeg(bytes, label) {
+  if (bytes.byteLength < 14 || !hasBytes(bytes, bytes.byteLength - 2, [255, 217])) {
+    fail2(`${label} JPEG data is truncated.`);
+  }
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  let offset = 2;
+  let width = 0;
+  let height = 0;
+  let sawFrame = false;
+  let sawScan = false;
+  while (offset < bytes.byteLength - 2) {
+    if (bytes[offset] !== 255) fail2(`${label} JPEG contains an invalid marker.`);
+    while (offset < bytes.byteLength - 2 && bytes[offset] === 255) offset += 1;
+    const marker = bytes[offset];
+    offset += 1;
+    if (marker === 0 || marker === 216 || marker === 217) fail2(`${label} JPEG contains an invalid marker.`);
+    if (marker === 1 || marker >= 208 && marker <= 215) continue;
+    if (offset + 2 > bytes.byteLength - 2) fail2(`${label} JPEG contains a truncated segment.`);
+    const segmentLength = view.getUint16(offset, false);
+    if (segmentLength < 2 || segmentLength > bytes.byteLength - offset) fail2(`${label} JPEG contains a truncated segment.`);
+    const dataStart = offset + 2;
+    const segmentEnd = offset + segmentLength;
+    if (isJpegStartOfFrame(marker)) {
+      if (![192, 193, 194].includes(marker)) fail2(`${label} JPEG uses an unsupported frame encoding.`);
+      if (sawFrame || segmentLength < 8) fail2(`${label} JPEG has an invalid frame header.`);
+      const components = bytes[dataStart + 5];
+      if (bytes[dataStart] !== 8 || ![1, 3, 4].includes(components) || segmentLength !== 8 + components * 3) {
+        fail2(`${label} JPEG has unsupported frame parameters.`);
+      }
+      height = view.getUint16(dataStart + 1, false);
+      width = view.getUint16(dataStart + 3, false);
+      sawFrame = true;
+    }
+    if (marker === 218) {
+      if (!sawFrame || segmentLength < 8 || segmentEnd >= bytes.byteLength - 2) {
+        fail2(`${label} JPEG has an invalid scan.`);
+      }
+      sawScan = true;
+      break;
+    }
+    offset = segmentEnd;
+  }
+  if (!sawFrame || !sawScan || width < 1 || height < 1) fail2(`${label} JPEG is incomplete.`);
+  return { mimeType: "image/jpeg", width, height };
+}
+function inspectWebp(bytes, label) {
+  if (bytes.byteLength < 30) fail2(`${label} WebP data is truncated.`);
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  if (view.getUint32(4, true) + 8 !== bytes.byteLength) fail2(`${label} WebP RIFF length is invalid.`);
+  let offset = 12;
+  let canvas = null;
+  let payload = null;
+  let sawPayload = false;
+  while (offset < bytes.byteLength) {
+    if (offset + 8 > bytes.byteLength) fail2(`${label} WebP contains a truncated chunk.`);
+    const type = ascii(bytes, offset, 4);
+    const chunkLength = view.getUint32(offset + 4, true);
+    const dataStart = offset + 8;
+    const dataEnd = dataStart + chunkLength;
+    const paddedEnd = dataEnd + (chunkLength & 1);
+    if (!/^[\x20-\x7e]{4}$/.test(type) || dataEnd < dataStart || paddedEnd > bytes.byteLength) {
+      fail2(`${label} WebP contains an invalid chunk.`);
+    }
+    if (type === "VP8X") {
+      if (canvas || chunkLength !== 10 || (bytes[dataStart] & 195) !== 0) fail2(`${label} WebP has an invalid VP8X header.`);
+      if ((bytes[dataStart] & 2) !== 0) fail2(`${label} uses animated WebP data, which hosted textures do not support.`);
+      canvas = {
+        width: 1 + readUint24Le(bytes, dataStart + 4),
+        height: 1 + readUint24Le(bytes, dataStart + 7)
+      };
+    } else if (type === "VP8 ") {
+      if (sawPayload || chunkLength < 10 || (bytes[dataStart] & 1) !== 0 || !hasBytes(bytes, dataStart + 3, [157, 1, 42])) {
+        fail2(`${label} WebP has an invalid VP8 frame.`);
+      }
+      payload = {
+        width: view.getUint16(dataStart + 6, true) & 16383,
+        height: view.getUint16(dataStart + 8, true) & 16383
+      };
+      sawPayload = true;
+    } else if (type === "VP8L") {
+      if (sawPayload || chunkLength < 5 || bytes[dataStart] !== 47) fail2(`${label} WebP has an invalid VP8L frame.`);
+      const packed = view.getUint32(dataStart + 1, true);
+      if (packed >>> 29 !== 0) fail2(`${label} WebP has an unsupported VP8L version.`);
+      payload = {
+        width: 1 + (packed & 16383),
+        height: 1 + (packed >>> 14 & 16383)
+      };
+      sawPayload = true;
+    } else if (type === "ANIM" || type === "ANMF") {
+      fail2(`${label} uses animated WebP data, which hosted textures do not support.`);
+    }
+    offset = paddedEnd;
+  }
+  if (offset !== bytes.byteLength || !sawPayload || !payload) fail2(`${label} WebP is incomplete.`);
+  if (canvas && (canvas.width !== payload.width || canvas.height !== payload.height)) {
+    fail2(`${label} WebP canvas dimensions do not match its image frame.`);
+  }
+  return { mimeType: "image/webp", width: (canvas ?? payload).width, height: (canvas ?? payload).height };
+}
+function isJpegStartOfFrame(marker) {
+  return marker >= 192 && marker <= 207 && ![196, 200, 204].includes(marker);
+}
+function hasBytes(bytes, offset, expected) {
+  if (offset < 0 || offset + expected.length > bytes.byteLength) return false;
+  return expected.every((value, index) => bytes[offset + index] === value);
+}
+function ascii(bytes, offset, length) {
+  if (offset < 0 || offset + length > bytes.byteLength) return "";
+  let result = "";
+  for (let index = 0; index < length; index += 1) result += String.fromCharCode(bytes[offset + index]);
+  return result;
+}
+function readUint24Le(bytes, offset) {
+  return bytes[offset] | bytes[offset + 1] << 8 | bytes[offset + 2] << 16;
+}
+var PNG_CRC_TABLE = createPngCrcTable();
+function createPngCrcTable() {
+  const table = new Uint32Array(256);
+  for (let value = 0; value < 256; value += 1) {
+    let crc = value;
+    for (let bit = 0; bit < 8; bit += 1) crc = crc & 1 ? 3988292384 ^ crc >>> 1 : crc >>> 1;
+    table[value] = crc >>> 0;
+  }
+  return table;
+}
+function pngCrc322(bytes, start, end) {
+  let crc = 4294967295;
+  for (let index = start; index < end; index += 1) crc = PNG_CRC_TABLE[(crc ^ bytes[index]) & 255] ^ crc >>> 8;
+  return (crc ^ 4294967295) >>> 0;
+}
+function array(value, label, maximum) {
+  if (value === void 0) return [];
+  if (!Array.isArray(value) || value.length > maximum) fail2(`The GLB ${label} collection is invalid or too large.`);
+  return value;
+}
+function record(value, message) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) fail2(message);
+  return value;
+}
+function safeInteger(value, minimum, maximum, message) {
+  if (!Number.isSafeInteger(value) || Number(value) < minimum || Number(value) > maximum) fail2(message);
+  return Number(value);
+}
+function safeIndex(value, length, message) {
+  if (length < 1) fail2(message);
+  return safeInteger(value, 0, length - 1, message);
+}
+function requiredFinite(value, message) {
+  if (typeof value !== "number" || !Number.isFinite(value)) fail2(message);
+  return value;
+}
+function validateFiniteOptional(value, label) {
+  if (value !== void 0) requiredFinite(value, `${label} is invalid.`);
+}
+function validateOptionalName(value, label) {
+  if (value !== void 0 && (typeof value !== "string" || value.length > MAX_NAME_LENGTH)) {
+    fail2(`${label} must be a string of at most ${MAX_NAME_LENGTH} characters.`);
+  }
+}
+function validateUnitFactor(value, label) {
+  if (value === void 0) return;
+  const number = requiredFinite(value, `${label} is invalid.`);
+  if (number < 0 || number > 1) fail2(`${label} is outside the supported range.`);
+}
+function validateFiniteArray(value, length, label) {
+  if (value === void 0) return;
+  if (!Array.isArray(value) || value.length !== length || value.some((entry) => typeof entry !== "number" || !Number.isFinite(entry))) {
+    fail2(`${label} must contain exactly ${length} finite numbers.`);
+  }
+}
+function validateFactorVector(value, length, minimum, maximum, label) {
+  if (value === void 0) return;
+  validateFiniteArray(value, length, label);
+  if (value.some((entry) => entry < minimum || entry > maximum)) {
+    fail2(`${label} is outside the supported range.`);
+  }
+}
+function validateAccessorBounds(value, componentCount, label) {
+  if (value === void 0) return;
+  validateFiniteArray(value, componentCount, label);
+}
+function componentByteLength(value, message) {
+  const sizes = /* @__PURE__ */ new Map([
+    [5120, 1],
+    [5121, 1],
+    [5122, 2],
+    [5123, 2],
+    [5125, 4],
+    [5126, 4]
+  ]);
+  const bytes = typeof value === "number" ? sizes.get(value) : void 0;
+  if (bytes === void 0) fail2(message);
+  return bytes;
+}
+function accessorTypeName(value, message) {
+  if (typeof value !== "string" || !["SCALAR", "VEC2", "VEC3", "VEC4", "MAT2", "MAT3", "MAT4"].includes(value)) {
+    fail2(message);
+  }
+  return value;
+}
+function accessorComponentCount(value, message) {
+  const counts = /* @__PURE__ */ new Map([
+    ["SCALAR", 1],
+    ["VEC2", 2],
+    ["VEC3", 3],
+    ["VEC4", 4],
+    ["MAT2", 4],
+    ["MAT3", 9],
+    ["MAT4", 16]
+  ]);
+  const count = typeof value === "string" ? counts.get(value) : void 0;
+  if (count === void 0) fail2(message);
+  return count;
+}
+function fail2(message) {
+  throw new HostedGlbValidationError(message);
 }
 
 // cloud/zebraSyncValidator.ts
-var [, , baselinePath, claimPath, outputPath] = process.argv;
+var ZEBRA_BUILT_IN_ASSET_COUNT = 72;
+var MAX_GITHUB_SCENE_BYTES = 95 * 1024 * 1024;
+var [, , baselinePath, claimPath, outputPath, uploadedAssetDirectory] = process.argv;
 if (!baselinePath || !claimPath || !outputPath) {
-  throw new Error("Usage: zebra-scene-sync-validator <baseline-scene> <claim-json> <output-scene>");
+  throw new Error("Usage: zebra-scene-sync-validator <baseline-scene> <claim-json> <output-scene> [uploaded-asset-directory]");
 }
 var baseline = parseJson(await readFile(baselinePath, "utf8"), "baseline Zebra scene");
 var claim = parseJson(await readFile(claimPath, "utf8"), "Cloudflare sync claim");
 assertClaimEnvelope(claim);
 validateScene(baseline);
+if (baseline.assets.length < ZEBRA_BUILT_IN_ASSET_COUNT) {
+  throw new Error("The baseline Zebra scene is missing required built-in assets.");
+}
 var compactSha = createHash("sha256").update(JSON.stringify(claim.compact)).digest("hex");
 if (compactSha !== claim.compactSha256) {
   throw new Error(`The compact scene hash ${compactSha} does not match the hosted receipt.`);
 }
-var validated = validateHostedZebraScene(claim.compact, baseline);
+var compactUploads = claim.compact.assets.slice(ZEBRA_BUILT_IN_ASSET_COUNT);
+var manifestDescriptors = claim.uploadedAssets.map(({ sha256: _sha256, ...descriptor }) => descriptor);
+if (JSON.stringify(compactUploads) !== JSON.stringify(manifestDescriptors)) {
+  throw new Error("The uploaded asset manifest does not match the queued Zebra scene.");
+}
+if (claim.uploadedAssets.length && !uploadedAssetDirectory) {
+  throw new Error("The queued Zebra scene requires a verified uploaded-asset directory.");
+}
+var uploadedAssets = await Promise.all(claim.uploadedAssets.map(async (asset) => {
+  const bytes = await readFile(path.join(uploadedAssetDirectory, asset.fileName));
+  if (bytes.byteLength !== asset.bytes) {
+    throw new Error(`Uploaded asset ${asset.id} does not match its declared byte length.`);
+  }
+  const digest = createHash("sha256").update(bytes).digest("hex");
+  if (digest !== asset.sha256) {
+    throw new Error(`Uploaded asset ${asset.id} does not match its hosted digest.`);
+  }
+  validateHostedGlb(new Uint8Array(bytes.buffer, bytes.byteOffset, bytes.byteLength));
+  const { sha256: _sha256, ...descriptor } = asset;
+  return { ...descriptor, source: bytes.toString("base64") };
+}));
+var trustedBaseline = structuredClone({
+  ...baseline,
+  assets: baseline.assets.slice(0, ZEBRA_BUILT_IN_ASSET_COUNT)
+});
+var validated = validateHostedZebraScene(claim.compact, trustedBaseline, uploadedAssets);
 var output = `${JSON.stringify(validated, null, 2)}
 `;
+if (Buffer.byteLength(output) > MAX_GITHUB_SCENE_BYTES) {
+  throw new Error("The validated Zebra scene exceeds GitHub's guarded scene-file limit.");
+}
 var outputSha = createHash("sha256").update(output).digest("hex");
 await writeFile(outputPath, output, { encoding: "utf8", flag: "wx" });
-process.stdout.write(JSON.stringify({ requestId: claim.requestId, revision: claim.revision, compactSha256: compactSha, sceneSha256: outputSha }));
+process.stdout.write(JSON.stringify({
+  requestId: claim.requestId,
+  revision: claim.revision,
+  compactSha256: compactSha,
+  sceneSha256: outputSha,
+  uploadedAssets: uploadedAssets.length
+}));
 function parseJson(source, label) {
   try {
     return JSON.parse(source);
@@ -1800,6 +3347,17 @@ function assertClaimEnvelope(claim2) {
   if (!Number.isSafeInteger(claim2.revision) || claim2.revision < 1) throw new Error("The hosted claim has an invalid revision.");
   if (!/^[0-9a-f]{40}$/i.test(claim2.expectedGitHead)) throw new Error("The hosted claim has an invalid expected Git head.");
   if (!/^[0-9a-f]{64}$/i.test(claim2.compactSha256)) throw new Error("The hosted claim has an invalid compact scene digest.");
+  if (!Array.isArray(claim2.uploadedAssets)) throw new Error("The hosted claim has an invalid uploaded asset manifest.");
+  const ids = /* @__PURE__ */ new Set();
+  for (const entry of claim2.uploadedAssets) {
+    if (!entry || typeof entry !== "object" || Array.isArray(entry)) throw new Error("The hosted claim has an invalid uploaded asset manifest.");
+    const { sha256, ...descriptor } = entry;
+    if (!isHostedUploadedAssetDescriptor(descriptor) || typeof sha256 !== "string" || !/^[0-9a-f]{64}$/.test(sha256)) {
+      throw new Error("The hosted claim has an invalid uploaded asset manifest.");
+    }
+    if (ids.has(descriptor.id)) throw new Error("The hosted claim repeats an uploaded asset.");
+    ids.add(descriptor.id);
+  }
   if (claim2.repository !== "Sparkah/zebra-circus-game" || claim2.branch !== "agent/game-port-studio-integration" || claim2.path !== "zebra-circus.scene.json") {
     throw new Error("The hosted claim targets a repository location outside the Zebra review branch.");
   }

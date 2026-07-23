@@ -55,8 +55,22 @@ jobs:
             import fs from "node:fs";
             const claim = JSON.parse(fs.readFileSync(process.env.CLAIM_FILE, "utf8"));
             const uuid = /^[a-f0-9]{8}-[a-f0-9]{4}-[1-8][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/i, sha = /^[0-9a-f]{40}$/i, digest = /^[0-9a-f]{64}$/i;
+            const assetId = /^asset-upload-[0-9a-f]{48}$/, assetDigest = /^[0-9a-f]{64}$/, assetKeys = ["bytes", "fileName", "format", "id", "name", "sha256", "type"];
             if (claim.pending !== true || !uuid.test(claim.requestId) || !uuid.test(claim.leaseId) || !sha.test(claim.expectedGitHead)) throw new Error("Invalid Zebra claim identity.");
             if (!digest.test(claim.compactSha256)) throw new Error("Invalid compact Zebra digest.");
+            if (!Array.isArray(claim.uploadedAssets)) throw new Error("Invalid Zebra uploaded asset manifest.");
+            const ids = new Set();
+            let uploadedBytes = 0;
+            for (const asset of claim.uploadedAssets) {
+              if (!asset || typeof asset !== "object" || Array.isArray(asset) || Object.keys(asset).sort().join(",") !== assetKeys.join(",")) throw new Error("Invalid Zebra uploaded asset manifest entry.");
+              if (!assetId.test(asset.id) || asset.fileName !== `${asset.id}.glb` || asset.type !== "model" || asset.format !== "glb") throw new Error("Invalid Zebra uploaded asset identity.");
+              if (typeof asset.name !== "string" || !asset.name.trim() || asset.name.length > 80 || /[\u0000-\u001f\u007f]/.test(asset.name)) throw new Error("Invalid Zebra uploaded asset name.");
+              if (!Number.isSafeInteger(asset.bytes) || asset.bytes <= 0 || asset.bytes > 8 * 1024 * 1024 || !assetDigest.test(asset.sha256)) throw new Error("Invalid Zebra uploaded asset receipt.");
+              if (ids.has(asset.id)) throw new Error("The Zebra claim repeats an uploaded asset.");
+              ids.add(asset.id);
+              uploadedBytes += asset.bytes;
+            }
+            if (uploadedBytes > 32 * 1024 * 1024) throw new Error("The Zebra uploaded asset manifest exceeds the project limit.");
             if (claim.repository !== "Sparkah/zebra-circus-game" || claim.branch !== "agent/game-port-studio-integration" || claim.path !== "zebra-circus.scene.json") throw new Error("The Zebra claim escaped its fixed repository target.");
             fs.appendFileSync(process.env.GITHUB_OUTPUT, `pending=true\nrequest_id=${claim.requestId}\nlease_id=${claim.leaseId}\nexpected_head=${claim.expectedGitHead}\ncompact_sha=${claim.compactSha256}\n`);
           '
@@ -73,6 +87,87 @@ jobs:
           sparse-checkout: zebra-circus.scene.json
           sparse-checkout-cone-mode: false
 
+      - name: Download lease-bound uploaded models
+        if: steps.claim.outputs.pending == 'true'
+        env:
+          ASSET_DIR: ${{ runner.temp }}/zebra-sync/uploads
+          CLAIM_FILE: ${{ runner.temp }}/zebra-sync/claim.json
+          LEASE_ID: ${{ steps.claim.outputs.lease_id }}
+          REQUEST_ID: ${{ steps.claim.outputs.request_id }}
+          SYNC_SECRET: ${{ secrets.ZEBRA_SYNC_SECRET }}
+          SYNC_URL: https://zebra-scene-editor.timofeymarkin98.workers.dev
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          mkdir -p "$ASSET_DIR"
+          node --input-type=module -e '
+            import crypto from "node:crypto";
+            import path from "node:path";
+            import { readFile, writeFile } from "node:fs/promises";
+
+            const MAX_ASSET_BYTES = 8 * 1024 * 1024;
+            const MAX_PROJECT_BYTES = 32 * 1024 * 1024;
+            const assetId = /^asset-upload-[0-9a-f]{48}$/;
+            const digest = /^[0-9a-f]{64}$/;
+            const assetKeys = ["bytes", "fileName", "format", "id", "name", "sha256", "type"];
+            const claim = JSON.parse(await readFile(process.env.CLAIM_FILE, "utf8"));
+            if (claim.requestId !== process.env.REQUEST_ID || claim.leaseId !== process.env.LEASE_ID || !Array.isArray(claim.uploadedAssets)) {
+              throw new Error("The Zebra asset download identity does not match the validated claim.");
+            }
+            if (!process.env.SYNC_SECRET) throw new Error("The Zebra sync secret is unavailable.");
+            const ids = new Set();
+            let declaredTotal = 0;
+            for (const entry of claim.uploadedAssets) {
+              if (!entry || typeof entry !== "object" || Array.isArray(entry) || Object.keys(entry).sort().join(",") !== assetKeys.join(",")) throw new Error("Invalid Zebra uploaded asset manifest entry.");
+              if (!assetId.test(entry.id) || entry.fileName !== `${entry.id}.glb` || entry.type !== "model" || entry.format !== "glb") throw new Error("Invalid Zebra uploaded asset identity.");
+              if (typeof entry.name !== "string" || !entry.name.trim() || entry.name.length > 80 || /[\u0000-\u001f\u007f]/.test(entry.name)) throw new Error("Invalid Zebra uploaded asset name.");
+              if (!Number.isSafeInteger(entry.bytes) || entry.bytes <= 0 || entry.bytes > MAX_ASSET_BYTES || !digest.test(entry.sha256)) throw new Error("Invalid Zebra uploaded asset receipt.");
+              if (ids.has(entry.id)) throw new Error("The Zebra claim repeats an uploaded asset.");
+              ids.add(entry.id);
+              declaredTotal += entry.bytes;
+            }
+            if (declaredTotal > MAX_PROJECT_BYTES) throw new Error("The Zebra uploaded asset manifest exceeds the project limit.");
+
+            const base = new URL(process.env.SYNC_URL);
+            if (base.protocol !== "https:" || base.username || base.password) throw new Error("The Zebra asset service URL is invalid.");
+            for (const entry of claim.uploadedAssets) {
+              const endpoint = new URL(`/api/github-sync/assets/${encodeURIComponent(claim.requestId)}/${encodeURIComponent(entry.id)}`, base);
+              const response = await fetch(endpoint, {
+                headers: {
+                  Authorization: `Bearer ${process.env.SYNC_SECRET}`,
+                  "X-Sync-Lease-Id": claim.leaseId,
+                  Accept: "model/gltf-binary"
+                },
+                redirect: "error"
+              });
+              if (!response.ok || !response.body) throw new Error(`Zebra asset ${entry.id} download failed with HTTP ${response.status}.`);
+              const contentLength = response.headers.get("content-length");
+              if (contentLength !== null && (!/^\d+$/.test(contentLength) || Number(contentLength) !== entry.bytes || Number(contentLength) > MAX_ASSET_BYTES)) {
+                throw new Error(`Zebra asset ${entry.id} returned an invalid Content-Length.`);
+              }
+              const chunks = [];
+              let received = 0;
+              const reader = response.body.getReader();
+              for (;;) {
+                const { done, value } = await reader.read();
+                if (done) break;
+                received += value.byteLength;
+                if (received > entry.bytes || received > MAX_ASSET_BYTES) {
+                  await reader.cancel();
+                  throw new Error(`Zebra asset ${entry.id} exceeded its guarded byte length.`);
+                }
+                chunks.push(Buffer.from(value));
+              }
+              if (received !== entry.bytes) throw new Error(`Zebra asset ${entry.id} did not match its declared byte length.`);
+              const bytes = Buffer.concat(chunks, received);
+              const actualDigest = crypto.createHash("sha256").update(bytes).digest("hex");
+              if (actualDigest !== entry.sha256) throw new Error(`Zebra asset ${entry.id} did not match its hosted digest.`);
+              await writeFile(path.join(process.env.ASSET_DIR, entry.fileName), bytes, { flag: "wx", mode: 0o600 });
+            }
+            process.stdout.write(`Verified ${claim.uploadedAssets.length} uploaded Zebra model(s).\n`);
+          '
+
       - name: Validate the exact scene and expected Git parent
         if: steps.claim.outputs.pending == 'true'
         id: prepare
@@ -80,6 +175,7 @@ jobs:
           CLAIM_FILE: ${{ runner.temp }}/zebra-sync/claim.json
           EXPECTED_HEAD: ${{ steps.claim.outputs.expected_head }}
           OUTPUT_SCENE: ${{ runner.temp }}/zebra-sync/validated.scene.json
+          UPLOAD_DIR: ${{ runner.temp }}/zebra-sync/uploads
         shell: bash
         run: |
           set -euo pipefail
@@ -98,7 +194,7 @@ jobs:
             git -C target show "$EXPECTED_HEAD:zebra-circus.scene.json" > "$baseline"
             already_pushed=true
           fi
-          node automation/.github/scripts/zebra-scene-sync-validator.mjs "$baseline" "$CLAIM_FILE" "$OUTPUT_SCENE"
+          node automation/.github/scripts/zebra-scene-sync-validator.mjs "$baseline" "$CLAIM_FILE" "$OUTPUT_SCENE" "$UPLOAD_DIR"
           if [ "$already_pushed" = true ]; then
             cmp --silent "$OUTPUT_SCENE" target/zebra-circus.scene.json || {
               echo "The existing child commit does not contain the queued Zebra scene." >&2
