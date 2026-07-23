@@ -1,0 +1,33 @@
+{
+  "schema": "game-port-studio/link@1",
+  "engine": {
+    "repository": "https://github.com/Sparkah/game-port-studio",
+    "visibility": "private",
+    "version": "0.19.1",
+    "testedCommit": "eb871a29adfa0055c8d364bf2cdfad3e6a91c5fa"
+  },
+  "adapter": "zebra-runtime",
+  "scene": "zebra-circus.scene.json",
+  "runtime": {
+    "entry": "index.html",
+    "host": "127.0.0.1",
+    "port": 8765
+  },
+  "studio": {
+    "host": "127.0.0.1",
+    "port": 8766
+  },
+  "collaboration": {
+    "mode": "focused-scene",
+    "repository": "Mucchun/zebra-circus-game",
+    "remote": "origin",
+    "commitMessage": "Update Zebra scene from editor",
+    "hosted": {
+      "editorUrl": "https://zebra-scene-editor.timofeymarkin98.workers.dev",
+      "reviewRepository": "Sparkah/zebra-circus-game",
+      "branch": "agent/game-port-studio-integration",
+      "scenePath": "zebra-circus.scene.json",
+      "pullRequestUrl": "https://github.com/Mucchun/zebra-circus-game/pull/1"
+    }
+  }
+}

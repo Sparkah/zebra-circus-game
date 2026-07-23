@@ -4,13 +4,14 @@ A first-person "blaster" browser game that doubles as a **Zebra Technologies** p
 
 **▶️ Play it now:** https://zebra-circus-game.vercel.app
 
-Built with [Three.js](https://threejs.org/) (r128) — no build step, no framework. The whole game is a single `index.html`.
+Built with [Three.js](https://threejs.org/) (r128) — no framework or game build step. `index.html` remains the canonical playable game; `zebra-circus.scene.json` is its editable arena layout.
 
 ## Controls
 - **WASD / Arrow keys** — move
 - **Mouse** — look / aim (click to lock pointer)
 - **Click** — shoot
 - **E** — pick up a device near you
+- **X** — close a scanned QR product panel and resume movement
 
 ## Featured devices
 MC3400 · MC9400 · PS30 · TC8300
@@ -19,9 +20,27 @@ MC3400 · MC9400 · PS30 · TC8300
 Any static server works (the 3D models need HTTP, not `file://`):
 
 ```bash
-python3 -m http.server 8000
-# then open http://localhost:8000
+python3 -m http.server 8765 --bind 127.0.0.1
+# then open http://127.0.0.1:8765/
 ```
+
+To move arena objects, physically navigate the authoring camera, replace an existing object's visual mesh, edit colliders, add simple scene objects, and save the reviewed scene back to GitHub, follow [EDITOR.md](EDITOR.md).
+
+**Online scene editor:** [zebra-scene-editor.timofeymarkin98.workers.dev](https://zebra-scene-editor.timofeymarkin98.workers.dev). Tim shares the private access code separately. The v0.19.1 build opens only the exact Zebra scene editor and adds real-time co-editing, F to frame the selected rendered object, Command-Z / Command-Shift-Z, Option/Alt + primary-drag orbit, Option/Alt + Command/Ctrl + primary-drag camera pan, a bottom **Project Assets** dock for bounded GLB uploads, mesh replacement, and a revocable **Connect AI** workflow. AI may discover/replace meshes and inspect/edit/undo/checkpoint the live room but cannot queue GitHub; validated scene-only GitHub updates stay human-confirmed and are reviewed in [pull request 1](https://github.com/Mucchun/zebra-circus-game/pull/1). No private engine checkout is required. Uploaded bytes use a dedicated private Standard R2 bucket guarded by hard storage/operation ceilings and a live predeploy policy check.
+
+Zebra pins the compatible private editor release in `game-port-studio.project.json`. For local engine work, collaborators with repository access can keep `game-port-studio` beside this repository and run:
+
+```bash
+node tools/start-game-port-studio.mjs
+```
+
+This starts the game on port 8765 and prints a one-run focused editor URL on port 8766. The collaborator lands directly in the real Zebra scene; the engine Home, conversion, publishing and project-generation UI is not rendered.
+
+## Focused scene editor
+
+The focused editor shows only Objects, the original Zebra viewport, Inspector, scene transforms, Undo/Redo, Play/Stop, Save and Save & Push. Edit/Play parity is exact because both modes pause and resume the same canonical `index.html` iframe, scene, canvas and WebGL context.
+
+The 222 original Zebra objects keep stable IDs, fixed hierarchy and gameplay roles. The 204 originals with Mesh Renderers can replace their visual with any checked-in Zebra GLB or an uploaded project GLB while retaining the same target, transform and authored Box Collider; replacement does not auto-fit the model or resize collision. The exact 72-file built-in pack remains immutable. Uploaded models live in the separate project asset catalog and can also create persistent model extras. The editor still supports **Empty**, **Cube**, **Sphere**, **Cylinder**, **Capsule** and **Plane** extras with an inline untextured material and optional Box Collider. Extras support transforms, parenting, visibility, duplicate and delete, but do not automatically gain Zebra scan, pickup, balloon, scoring or HUD behavior.
 
 ## Install as an app (PWA)
 The game ships a web-app manifest + service worker, so it's installable:
@@ -31,7 +50,11 @@ The game ships a web-app manifest + service worker, so it's installable:
 
 ## Repository layout
 ```
-index.html                 the entire game
+index.html                 canonical playable game
+zebra-circus.scene.json    222-object editable arena layout
+game-port-studio.project.json  pinned private editor version and verified commit
+models/editor/             exact QR, seated-crowd, imported-crowd, and arena GLBs
+tools/  tests/             editor launcher, deterministic scene builders, parity and portability checks
 vendor/                    three.js + GLTFLoader (vendored, no CDN)
 models/  textures/         3D assets
 icons/  manifest.webmanifest  sw.js   PWA installability

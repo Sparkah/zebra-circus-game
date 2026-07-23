@@ -1,8 +1,9 @@
 // Zebra Circus Blaster — service worker (offline + installability)
-const CACHE = 'zcb-v1';
+const CACHE = 'zcb-v4-replaceable-runtime-visuals';
 const CORE = [
   './',
   './index.html',
+  './zebra-circus.scene.json',
   './manifest.webmanifest',
   './vendor/three.min.js',
   './vendor/GLTFLoader.js',
@@ -24,6 +25,22 @@ self.addEventListener('activate', e => {
 // Cache-first, then network; runtime-cache same-origin GETs (models/textures) for offline replay.
 self.addEventListener('fetch', e => {
   if (e.request.method !== 'GET') return;
+  const url = new URL(e.request.url);
+  const needsFreshAuthoredSource = e.request.mode === 'navigate'
+    || url.pathname.endsWith('/index.html')
+    || url.pathname.endsWith('/zebra-circus.scene.json');
+  if (needsFreshAuthoredSource) {
+    e.respondWith(
+      fetch(e.request).then(resp => {
+        if (resp.ok && url.origin === location.origin) {
+          const clone = resp.clone();
+          caches.open(CACHE).then(c => c.put(e.request, clone));
+        }
+        return resp;
+      }).catch(() => caches.match(e.request).then(hit => hit || caches.match('./index.html')))
+    );
+    return;
+  }
   e.respondWith(
     caches.match(e.request).then(hit => hit || fetch(e.request).then(resp => {
       try {

@@ -4,7 +4,7 @@ const http = require('http');
 const fs = require('fs');
 const path = require('path');
 
-const ROOT = '/Users/serramac/zebra-circus-game'; // the game assets folder
+const ROOT = path.resolve(__dirname, '..');
 const PORT = 58762;
 
 const MIME = {
