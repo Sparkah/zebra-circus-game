@@ -1,6 +1,6 @@
 # Zebra scene editing
 
-`zebra-circus.scene.json` uses the stable `scene@0.14` document schema inside the focused Zebra editor v0.19.1. It contains 222 stable objects, 15 Box Colliders and 72 exact built-in GLB assets. The exact set includes four different product QR boards, 40 deterministic seated spectators, and the six original crowd models used across 28 imported spectators. Project uploads extend that immutable pack without rewriting it.
+`zebra-circus.scene.json` uses the stable `scene@0.14` document schema inside the focused Zebra editor v0.19.2. It contains 222 stable objects, 15 Box Colliders and 72 exact built-in GLB assets. The exact set includes four different product QR boards, 40 deterministic seated spectators, and the six original crowd models used across 28 imported spectators. Project uploads extend that immutable pack without rewriting it.
 
 ## Exact scene boundary
 
@@ -10,7 +10,7 @@ The focused collaborator session does not render conversion, publishing, assista
 
 ## Edit online in real time
 
-Open [zebra-scene-editor.timofeymarkin98.workers.dev](https://zebra-scene-editor.timofeymarkin98.workers.dev). Enter your name and the access code Tim shares privately, then wait for **Live**. No engine checkout or local setup is required. The v0.19.1 asset-enabled release uses a dedicated private Standard R2 bucket with executable free-tier ceilings and a fail-closed deployment check.
+Open [zebra-scene-editor.timofeymarkin98.workers.dev](https://zebra-scene-editor.timofeymarkin98.workers.dev). Enter your name and the access code Tim shares privately, then wait for **Live**. No engine checkout or local setup is required. The v0.19.2 asset-enabled release uses a dedicated private Standard R2 bucket with executable free-tier ceilings and a fail-closed deployment check.
 
 1. Select an object in **Objects** or in the exact runtime viewport and edit it with the Inspector, Move/Rotate/Scale, W/E/R or the supported Add object/component controls.
 2. Other signed-in editors appear beside the Live status. Different fields merge; a same-field race keeps the first confirmed value and asks the other editor to retry.
@@ -64,7 +64,7 @@ Game Port Studio is a separate private repository pinned by `game-port-studio.pr
 git clone https://github.com/Sparkah/game-port-studio.git
 git clone https://github.com/Mucchun/zebra-circus-game.git
 cd game-port-studio
-git checkout v0.19.1
+git checkout v0.19.2
 npm ci
 ```
 
