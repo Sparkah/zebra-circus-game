@@ -1,4 +1,4 @@
-desktop/
-**/node_modules
-*.zip
-README.txt
+test-output
+multiplayer/.wrangler
+_STATUS.md
+iter_visual_check
