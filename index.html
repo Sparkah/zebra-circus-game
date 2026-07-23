@@ -29,7 +29,7 @@ body { background: #000; overflow: hidden; font-family: 'Source Sans 3', 'Barlow
 #game-canvas { display: block; width: 100vw; height: 100vh; }
 .studio-authoring-badge {
   position: fixed; left: 12px; bottom: 12px; z-index: 1200;
-  padding: 7px 10px; border: 1px solid rgba(185,255,119,.72);
+  padding: 7px 10px 7px 32px; border: 1px solid rgba(185,255,119,.72);
   background: rgba(5,12,8,.82); color: #dfffc8;
   font: 600 11px/1.35 Arial, sans-serif; letter-spacing: .04em;
   pointer-events: none;
@@ -39,6 +39,14 @@ body { background: #000; overflow: hidden; font-family: 'Source Sans 3', 'Barlow
   margin-top: 5px; padding: 3px 7px; border: 1px solid rgba(185,255,119,.55);
   background: #142018; color: #dfffc8; font: inherit; cursor: pointer; pointer-events: auto;
 }
+.studio-authoring-badge .studio-badge-close {
+  position: absolute; top: 0; left: 0; width: 24px; height: 24px;
+  margin: 0; padding: 0; border: 0;
+  border-right: 1px solid rgba(185,255,119,.4); border-bottom: 1px solid rgba(185,255,119,.4);
+  background: rgba(20,32,24,.92); color: #b9ff77;
+  font: 700 14px/1 Arial, sans-serif; cursor: pointer; pointer-events: auto;
+}
+.studio-authoring-badge .studio-badge-close:hover { background: #1d2f22; color: #dfffc8; }
 
 /* ── HUD ── */
 #hud { position: fixed; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; z-index: 10; display: none; }
@@ -2369,10 +2377,15 @@ function startStudioAuthoring() {
 
   const editorCamera = new THREE.PerspectiveCamera(50, window.innerWidth / window.innerHeight, 0.05, 200);
   editorCamera.position.set(11, 7.5, 13);
-  const badge = document.createElement('div');
-  badge.className = 'studio-authoring-badge';
-  badge.innerHTML = '<strong>EDITING ORIGINAL ZEBRA RENDERER</strong>Click to select · F frame · Option/Alt-drag orbit · add Command/Ctrl to pan · W/E/R tools · C camera<br><button type="button">Game camera</button>';
-  document.body.appendChild(badge);
+  let studioHintsClosed = false;
+  try { studioHintsClosed = sessionStorage.getItem('zebraStudioHintsClosed') === '1'; } catch (err) { studioHintsClosed = false; }
+  let badge = null;
+  if (!studioHintsClosed) {
+    badge = document.createElement('div');
+    badge.className = 'studio-authoring-badge';
+    badge.innerHTML = '<button type="button" class="studio-badge-close" aria-label="Close editing help">×</button><strong>EDITING ORIGINAL ZEBRA RENDERER</strong>Click to select · F frame · Option/Alt-drag orbit · add Command/Ctrl to pan · W/E/R tools · C camera<br><button type="button" class="studio-badge-camera">Game camera</button>';
+    document.body.appendChild(badge);
+  }
 
   studioAuthoring = {
     mode: 'authoring',
@@ -2396,7 +2409,14 @@ function startStudioAuthoring() {
   };
   updateStudioOrbitCamera();
   installStudioAuthoringInput();
-  badge.querySelector('button').addEventListener('click', toggleStudioCameraView);
+  if (badge) {
+    badge.querySelector('.studio-badge-camera').addEventListener('click', toggleStudioCameraView);
+    badge.querySelector('.studio-badge-close').addEventListener('click', () => {
+      try { sessionStorage.setItem('zebraStudioHintsClosed', '1'); } catch (err) {}
+      badge.remove();
+      if (studioAuthoring) studioAuthoring.badge = null;
+    });
+  }
   setStudioAuthoringSelection(requestedStudioSelection);
   setStudioAuthoringTransformMode(requestedStudioTransformMode);
   postRuntimeBridge({
@@ -2432,7 +2452,7 @@ function installStudioAuthoringInput() {
       if (studioAuthoring.cameraDrag || studioAuthoring.drag) return;
       if (studioAuthoring.cameraView !== 'orbit') {
         studioAuthoring.cameraView = 'orbit';
-        const button = studioAuthoring.badge.querySelector('button');
+        const button = studioAuthoring.badge?.querySelector('.studio-badge-camera');
         if (button) button.textContent = 'Game camera';
         refreshStudioAuthoringHelpers();
         requestStudioEditorRender();
@@ -2718,7 +2738,7 @@ function frameStudioAuthoringObject(id) {
   }
   studioAuthoring.orbitDistance = Math.max(2, Math.min(80, distance));
   updateStudioOrbitCamera();
-  const button = studioAuthoring.badge.querySelector('button');
+  const button = studioAuthoring.badge?.querySelector('.studio-badge-camera');
   if (button) button.textContent = 'Game camera';
   requestStudioEditorRender();
   return true;
@@ -2727,7 +2747,7 @@ function frameStudioAuthoringObject(id) {
 function toggleStudioCameraView() {
   if (!studioAuthoring || studioAuthoring.mode !== 'authoring') return;
   studioAuthoring.cameraView = studioAuthoring.cameraView === 'orbit' ? 'game' : 'orbit';
-  const button = studioAuthoring.badge.querySelector('button');
+  const button = studioAuthoring.badge?.querySelector('.studio-badge-camera');
   if (button) button.textContent = studioAuthoring.cameraView === 'orbit' ? 'Game camera' : 'Orbit camera';
   refreshStudioAuthoringHelpers();
   requestStudioEditorRender();
@@ -2944,7 +2964,7 @@ function setStudioRuntimeMode(mode) {
     resetStudioGameplayState();
     studioAuthoring.mode = 'playing';
     studioAuthoring.cameraView = 'game';
-    studioAuthoring.badge.style.display = 'none';
+    if (studioAuthoring.badge) studioAuthoring.badge.style.display = 'none';
     refreshStudioAuthoringHelpers();
     document.getElementById('tutorial-overlay').style.display = 'flex';
     clock = new THREE.Clock();
@@ -2960,7 +2980,7 @@ function setStudioRuntimeMode(mode) {
     resetStudioGameplayState();
     studioAuthoring.mode = 'authoring';
     studioAuthoring.cameraView = 'orbit';
-    studioAuthoring.badge.style.display = '';
+    if (studioAuthoring.badge) studioAuthoring.badge.style.display = '';
     setStudioAuthoringSelection(requestedStudioSelection);
     setStudioAuthoringTransformMode(requestedStudioTransformMode);
     requestStudioEditorRender();
